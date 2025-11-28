@@ -151,10 +151,11 @@ void main() {
 
   // Iterate Julia: z = z^2 + c
   int maxIter = u_maxIter;
-  float i;
+  float i = 0.0;
   float trap = 1e9; // distance estimator trap (optional)
-  for (i = 0.0; i < 2000.0; i++) {
-    if (int(i) >= maxIter) break;
+  for (int ii = 0; ii < 2000; ii++) {
+    i = float(ii);
+    if (ii >= maxIter) break;
     // z^2 in complex
     vec2 z2 = vec2(z.x*z.x - z.y*z.y, 2.0*z.x*z.y) + c;
     z = z2;
