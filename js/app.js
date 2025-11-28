@@ -272,6 +272,17 @@ vec3 colorPlasma(vec2 p) {
     return getPalette(v, u_palette);
 }
 
+// Dynamic Morph
+vec3 colorDynamicMorph(vec3 p) {
+  vec3 q = p;
+  float t = u_time * 0.1;
+  for (int i = 0; i < 10; i++) {
+    if (i >= u_maxIter) break;
+    q = abs(q) / dot(q, q) - vec3(0.5 + 0.3*sin(t), 0.5 + 0.3*cos(t), 0.5 + 0.3*sin(t*1.2));
+  }
+  return getPalette(length(q), u_palette);
+}
+
 void main() {
   // Map pixel to complex plane, keeping aspect ratio
   vec2 uv = (gl_FragCoord.xy / u_resolution) * 2.0 - 1.0; // [-1,1]
@@ -313,6 +324,11 @@ void main() {
     col = getPalette(shade, u_palette);
   } else if (u_fractalType == 10) {
     col = colorPlasma(z);
+  } else if (u_fractalType == 11) {
+    vec2 pNorm2 = z / max(1e-6, u_span) + vec2(0.5);
+    float zSlice = 0.5 + 0.45 * sin(u_time * 0.22 + 1.0);
+    vec3 p3 = vec3(pNorm2, zSlice);
+    col = colorDynamicMorph(p3);
   } else {
     // Overlay-only types: neutral background
     col = vec3(0.0);
@@ -839,6 +855,12 @@ void main() {
       } else if (type === 10) {
         // Colorful Plasma
         state.maxIter = 50; // Not used by plasma, but can be repurposed
+        state.scale = 1.0;
+        state.rotationDeg = 0;
+        state.center = { x: 0.0, y: 0.0 };
+      } else if (type === 11) {
+        // Dynamic Morph
+        state.maxIter = 10;
         state.scale = 1.0;
         state.rotationDeg = 0;
         state.center = { x: 0.0, y: 0.0 };
