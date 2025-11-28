@@ -84,6 +84,106 @@ textarea {
    Author's custom styles
    ========================================================================== */
 
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: #0d0d0f;
+  color: #eaeaea;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+}
+
+#glcanvas {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  display: block; /* removes gaps below canvas */
+  background: #000;
+}
+
+#controls {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  right: auto;
+  bottom: auto;
+  min-width: 260px;
+  max-width: min(88vw, 420px);
+  background: rgba(12, 12, 16, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 12px 14px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+  z-index: 10;
+}
+
+#controls .row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0;
+}
+
+#controls label {
+  min-width: 130px;
+  font-size: 0.92rem;
+  color: #d8d8dc;
+}
+
+#controls input[type="range"],
+#controls select {
+  flex: 1 1 auto;
+}
+
+#controls select,
+#controls input,
+#controls button {
+  background: rgba(255,255,255,0.06);
+  color: #f2f2f5;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+
+#controls input[type="range"] {
+  accent-color: #ffb000; /* modern browsers */
+}
+
+#controls .buttons {
+  display: flex;
+  gap: 10px;
+}
+
+#controls button {
+  cursor: pointer;
+}
+
+#controls .hint {
+  margin-top: 6px;
+  font-size: 0.8rem;
+  color: #9aa0a6;
+}
+
+@media (max-width: 600px) {
+  #controls {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    border-radius: 12px 12px 0 0;
+    max-width: none;
+  }
+  #controls .row {
+    flex-wrap: wrap;
+  }
+  #controls label {
+    width: 100%;
+  }
+}
+
 /* ==========================================================================
    Helper classes
    ========================================================================== */

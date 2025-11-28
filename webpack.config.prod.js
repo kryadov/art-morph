@@ -8,6 +8,7 @@ module.exports = merge(common, {
   plugins: [
     new HtmlWebpackPlugin({
       template: './index.html',
+      inject: false, // keep manual <script src="js/app.js"></script> in template to avoid double-injection
     }),
     new CopyPlugin({
       patterns: [
