@@ -259,6 +259,19 @@ float sierpinskiPyramidDepth(vec3 p) {
   return 1.0;
 }
 
+// Plasma effect
+vec3 colorPlasma(vec2 p) {
+    float t = u_time * 0.5;
+    float v = 0.0;
+    v += sin(p.x * 8.0 + t);
+    v += sin((p.y * 5.0 - t) * 2.0);
+    v += sin((p.x + p.y + t) * 4.0);
+    vec2 p2 = p * 2.0;
+    v += sin(sqrt(p2.x*p2.x + p2.y*p2.y + 1.0) + t);
+    v = v / 4.0;
+    return getPalette(v, u_palette);
+}
+
 void main() {
   // Map pixel to complex plane, keeping aspect ratio
   vec2 uv = (gl_FragCoord.xy / u_resolution) * 2.0 - 1.0; // [-1,1]
@@ -298,6 +311,8 @@ void main() {
     float t = sierpinskiPyramidDepth(p3);
     float shade = 1.0 - t;
     col = getPalette(shade, u_palette);
+  } else if (u_fractalType == 10) {
+    col = colorPlasma(z);
   } else {
     // Overlay-only types: neutral background
     col = vec3(0.0);
@@ -821,6 +836,12 @@ void main() {
         state.rotationDeg = 0;
         state.center = { x: 0.0, y: 0.0 };
         fernState.ready = false;
+      } else if (type === 10) {
+        // Colorful Plasma
+        state.maxIter = 50; // Not used by plasma, but can be repurposed
+        state.scale = 1.0;
+        state.rotationDeg = 0;
+        state.center = { x: 0.0, y: 0.0 };
       }
       // Reflect in UI controls
       ui.iterations.value = String(state.maxIter);
