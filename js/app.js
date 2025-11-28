@@ -56,6 +56,8 @@
   let timeSec = 0; // accumulated time in seconds (paused respects state.playing)
   let needsRender = true;
   let overlayNeedsRender = true;
+  // State for stochastic overlay fractals (e.g., Barnsley fern)
+  let fernState = { x: 0, y: 0, ready: false };
 
   // Settings panel visibility persistence key
   const LS_KEY_CONTROLS_HIDDEN = 'ui.controlsHidden';
@@ -465,6 +467,63 @@ void main() {
     overlayCtx.lineTo(s.x, s.y);
   }
 
+  // Stochastic Barnsley fern (IFS) — overlay dots
+  function drawFern(iter) {
+    if (!overlayCtx) return;
+    // Points per frame scales with iterations slider
+    const pts = Math.max(2000, Math.min(40000, (iter|0) * 200));
+    // Canonical fern bounding box
+    const xmin = -2.1820, xmax = 2.6558; const w = xmax - xmin;
+    const ymin = 0.0, ymax = 9.9983; const h = ymax - ymin;
+    const s = 0.9; // occupy 90% of unit height
+    const xscale = s * (w / h);
+    const yscale = s;
+    const offx = 0.5 - xscale * 0.5;
+    const offy = 0.05; // bottom margin
+
+    // Visuals
+    const size = Math.max(1, Math.floor(1 * dpr));
+    overlayCtx.save();
+    overlayCtx.fillStyle = 'rgba(234,234,234,0.9)';
+
+    // Initialize state once
+    if (!fernState.ready) {
+      fernState.x = 0; fernState.y = 0; fernState.ready = true;
+    }
+    let x = fernState.x, y = fernState.y;
+    for (let i = 0; i < pts; i++) {
+      const r = Math.random();
+      let nx, ny;
+      if (r < 0.01) {
+        // Stem
+        nx = 0;
+        ny = 0.16 * y;
+      } else if (r < 0.86) {
+        // Successively smaller leaflets
+        nx = 0.85 * x + 0.04 * y;
+        ny = -0.04 * x + 0.85 * y + 1.6;
+      } else if (r < 0.93) {
+        // Largest left-hand leaflet
+        nx = 0.20 * x - 0.26 * y;
+        ny = 0.23 * x + 0.22 * y + 1.6;
+      } else {
+        // Largest right-hand leaflet
+        nx = -0.15 * x + 0.28 * y;
+        ny = 0.26 * x + 0.24 * y + 0.44;
+      }
+      x = nx; y = ny;
+
+      // Map to normalized [0,1]
+      const nnx = offx + ((x - xmin) / w) * xscale;
+      const nny = offy + ((y - ymin) / h) * yscale;
+      const wpt = worldFromNorm(nnx, nny);
+      const spt = planeToScreen(wpt.x, wpt.y);
+      overlayCtx.fillRect(spt.x, spt.y, size, size);
+    }
+    fernState.x = x; fernState.y = y;
+    overlayCtx.restore();
+  }
+
   function drawKoch(iter) {
     if (!overlayCtx) return;
     iter = Math.max(0, Math.min(6, iter|0));
@@ -659,6 +718,8 @@ void main() {
       drawPythagoras(state.maxIter);
     } else if (state.fractalType === 8) {
       drawTree(state.maxIter);
+    } else if (state.fractalType === 9) {
+      drawFern(state.maxIter);
     }
   }
 
@@ -753,6 +814,13 @@ void main() {
         state.scale = 1.0;
         state.rotationDeg = 0;
         state.center = { x: 0.0, y: 0.0 };
+      } else if (type === 9) {
+        // Stochastic Fern (IFS)
+        state.maxIter = 200; // controls points per frame
+        state.scale = 1.0;
+        state.rotationDeg = 0;
+        state.center = { x: 0.0, y: 0.0 };
+        fernState.ready = false;
       }
       // Reflect in UI controls
       ui.iterations.value = String(state.maxIter);
@@ -767,6 +835,8 @@ void main() {
         if (t === state.fractalType) return;
         state.fractalType = t;
         applyFractalDefaults(t);
+        // Reset stochastic states on switch
+        fernState.ready = false;
         needsRender = true;
       });
     }
@@ -807,6 +877,7 @@ void main() {
       ui.speed.value = String(state.speed);
       ui.playPause.textContent = 'Pause';
       ui.playPause.setAttribute('aria-pressed', 'true');
+      fernState.ready = false;
       needsRender = true; updateUI();
     });
 
