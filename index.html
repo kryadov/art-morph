@@ -24,8 +24,23 @@
 
 <body>
   <canvas id="glcanvas" aria-label="Fractal canvas" role="img"></canvas>
+  <canvas id="overlay2d" aria-hidden="true"></canvas>
 
   <div id="controls" aria-label="Controls panel">
+    <div class="row">
+      <label for="fractal">Fractal</label>
+      <select id="fractal">
+        <option value="0">Julia (complex)</option>
+        <option value="1">Sierpinski Triangle</option>
+        <option value="2">Sierpinski Carpet</option>
+        <option value="3">Menger Sponge (slice)</option>
+        <option value="4">Sierpinski Pyramid (slice)</option>
+        <option value="5">Koch Curve (L-system)</option>
+        <option value="6">Peano Curve</option>
+        <option value="7">Pythagoras Tree</option>
+        <option value="8">L-system Plant</option>
+      </select>
+    </div>
     <div class="row">
       <label for="palette">Palette</label>
       <select id="palette">
@@ -36,7 +51,7 @@
     </div>
     <div class="row">
       <label for="iterations">Iterations <span id="iterationsValue">200</span></label>
-      <input id="iterations" type="range" min="50" max="1000" value="200" step="10">
+      <input id="iterations" type="range" min="1" max="1000" value="200" step="1">
     </div>
     <div class="row">
       <label for="zoom">Zoom <span id="zoomValue">1.0×</span></label>
@@ -53,8 +68,9 @@
     <div class="row buttons">
       <button id="playPause" aria-pressed="true">Pause</button>
       <button id="reset">Reset</button>
+      <button id="recenter">Recenter</button>
     </div>
-    <div class="hint">Tip: Drag to pan, scroll to zoom, double-click to recenter. Pinch to zoom on touch.</div>
+    <div class="hint">Tip: Drag to pan, scroll to zoom. Double-click canvas to toggle settings. Pinch to zoom on touch.</div>
   </div>
 
   <noscript>

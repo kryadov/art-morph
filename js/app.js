@@ -9,11 +9,14 @@
 (() => {
   const $ = (sel) => document.querySelector(sel);
   const canvas = document.getElementById('glcanvas');
+  const overlay = document.getElementById('overlay2d');
+  const overlayCtx = overlay ? overlay.getContext('2d') : null;
   const fallbackEl = document.getElementById('gl-fallback');
 
   // UI elements
   const ui = {
     controls: $('#controls'),
+    fractal: $('#fractal'),
     palette: $('#palette'),
     iterations: $('#iterations'),
     zoom: $('#zoom'),
@@ -21,6 +24,7 @@
     speed: $('#speed'),
     playPause: $('#playPause'),
     reset: $('#reset'),
+    recenter: $('#recenter'),
     iterationsValue: $('#iterationsValue'),
     zoomValue: $('#zoomValue'),
     rotationValue: $('#rotationValue'),
@@ -29,6 +33,7 @@
 
   // Initial view parameters
   const state = {
+    fractalType: 0, // 0=Julia,1=Sierpinski Triangle,2=Sierpinski Carpet
     palette: 0,
     maxIter: 200,
     scale: 1.0, // 1.0 = default view
@@ -50,6 +55,7 @@
   let lastT = performance.now();
   let timeSec = 0; // accumulated time in seconds (paused respects state.playing)
   let needsRender = true;
+  let overlayNeedsRender = true;
 
   // Settings panel visibility persistence key
   const LS_KEY_CONTROLS_HIDDEN = 'ui.controlsHidden';
@@ -99,6 +105,7 @@ uniform float u_rotation;   // radians
 uniform float u_time;       // seconds
 uniform int u_maxIter;
 uniform int u_palette;      // 0=Khokhloma,1=Gzhel,2=Rainbow
+uniform int u_fractalType;  // 0=Julia,1=Tri,2=Carpet
 
 // Utility: rotate 2D vector
 mat2 rot(float a) {
@@ -151,7 +158,105 @@ vec3 getPalette(float t, int which) {
   return paletteRainbow(t);
 }
 
-// Continuous coloring for Julia set
+// Compute color for Julia set at point z0
+vec3 colorJulia(vec2 z0) {
+  vec2 z = z0;
+  // Animate c over time to morph shapes
+  float t = u_time * 0.25; // slow down a bit
+  vec2 c = vec2(0.285 + 0.25*cos(t*1.7), 0.01 + 0.25*sin(t*1.2));
+
+  int maxIter = u_maxIter;
+  float i = 0.0;
+  float trap = 1e9;
+  for (int ii = 0; ii < 2000; ii++) {
+    i = float(ii);
+    if (ii >= maxIter) break;
+    vec2 z2 = vec2(z.x*z.x - z.y*z.y, 2.0*z.x*z.y) + c;
+    z = z2;
+    float r2 = dot(z, z);
+    trap = min(trap, abs(z.x) + abs(z.y));
+    if (r2 > 256.0) break;
+  }
+
+  float colorT;
+  if (int(i) >= maxIter) {
+    colorT = 0.0;
+  } else {
+    float r = length(z);
+    float nu = i - log2(log2(max(r, 1.001))) + 4.0;
+    colorT = nu / float(maxIter);
+  }
+  colorT = clamp(colorT + 0.15 * exp(-3.0*trap), 0.0, 1.0);
+  return getPalette(colorT, u_palette);
+}
+
+// Sierpinski Triangle test using base-2 fractional folding
+// Returns t in [0,1], where lower values indicate earlier removal (more hollow)
+float sierpinskiTri(vec2 pNorm) {
+  vec2 q = pNorm;
+  float tLevel = 1.0;
+  for (int ii = 0; ii < 1024; ii++) {
+    if (ii >= u_maxIter) break;
+    vec2 r = fract(q * 2.0);
+    // In a unit triangle tiling, points with r.x + r.y > 1 are in the 'removed' central region
+    if (r.x + r.y > 1.0) {
+      tLevel = float(ii) / max(1.0, float(u_maxIter));
+      return tLevel; // early removal
+    }
+    q = r;
+  }
+  return 1.0; // never removed => deepest level
+}
+
+// Sierpinski Carpet using base-3 digit test
+float sierpinskiCarpet(vec2 pNorm) {
+  vec2 q = pNorm;
+  float tLevel = 1.0;
+  for (int ii = 0; ii < 1024; ii++) {
+    if (ii >= u_maxIter) break;
+    vec2 r = fract(q * 3.0);
+    if (r.x > 1.0/3.0 && r.x < 2.0/3.0 && r.y > 1.0/3.0 && r.y < 2.0/3.0) {
+      tLevel = float(ii) / max(1.0, float(u_maxIter));
+      return tLevel;
+    }
+    q = r;
+  }
+  return 1.0;
+}
+
+float isMiddleThird(float a) {
+  return step(1.0/3.0, a) * step(a, 2.0/3.0);
+}
+
+// Menger Sponge membership depth using base-3 rule: removed if at any level, at least two axes in middle third
+float mengerDepth(vec3 p) {
+  vec3 q = p;
+  for (int ii = 0; ii < 128; ii++) {
+    if (ii >= u_maxIter) break;
+    vec3 r = fract(q * 3.0);
+    float midCount = isMiddleThird(r.x) + isMiddleThird(r.y) + isMiddleThird(r.z);
+    if (midCount >= 2.0) {
+      return float(ii) / max(1.0, float(u_maxIter));
+    }
+    q = r;
+  }
+  return 1.0;
+}
+
+// Sierpinski Pyramid (tetrahedral gasket) approximate rule: removed when x+y+y >1 in tri, generalized to 3D as sum > 1
+float sierpinskiPyramidDepth(vec3 p) {
+  vec3 q = p;
+  for (int ii = 0; ii < 128; ii++) {
+    if (ii >= u_maxIter) break;
+    vec3 r = fract(q * 2.0);
+    if (r.x + r.y + r.z > 1.0) {
+      return float(ii) / max(1.0, float(u_maxIter));
+    }
+    q = r;
+  }
+  return 1.0;
+}
+
 void main() {
   // Map pixel to complex plane, keeping aspect ratio
   vec2 uv = (gl_FragCoord.xy / u_resolution) * 2.0 - 1.0; // [-1,1]
@@ -161,39 +266,40 @@ void main() {
   // span defines width of plane; scale uv accordingly and rotate
   vec2 z = (rot(u_rotation) * uv) * (u_span * 0.5) + u_center;
 
-  // Animate c over time to morph shapes
-  float t = u_time * 0.25; // slow down a bit
-  vec2 c = vec2(0.285 + 0.25*cos(t*1.7), 0.01 + 0.25*sin(t*1.2));
-
-  // Iterate Julia: z = z^2 + c
-  int maxIter = u_maxIter;
-  float i = 0.0;
-  float trap = 1e9; // distance estimator trap (optional)
-  for (int ii = 0; ii < 2000; ii++) {
-    i = float(ii);
-    if (ii >= maxIter) break;
-    // z^2 in complex
-    vec2 z2 = vec2(z.x*z.x - z.y*z.y, 2.0*z.x*z.y) + c;
-    z = z2;
-    float r2 = dot(z, z);
-    trap = min(trap, abs(z.x) + abs(z.y));
-    if (r2 > 256.0) break; // bailout
-  }
-
-  float colorT;
-  if (int(i) >= maxIter) {
-    // inside set: dark shade with trap coloring
-    colorT = 0.0;
+  vec3 col;
+  if (u_fractalType == 0) {
+    col = colorJulia(z);
+  } else if (u_fractalType == 1) {
+    // Map to unit square roughly centered around current center/span
+    vec2 pNorm = z / max(1e-6, u_span) + vec2(0.5);
+    float tTri = sierpinskiTri(pNorm);
+    float shade = 1.0 - tTri; // earlier removal = brighter
+    col = getPalette(shade, u_palette);
+  } else if (u_fractalType == 2) {
+    vec2 pNorm = z / max(1e-6, u_span) + vec2(0.5);
+    float tCar = sierpinskiCarpet(pNorm);
+    float shade = 1.0 - tCar;
+    col = getPalette(shade, u_palette);
+  } else if (u_fractalType == 3) {
+    // 3D: Menger Sponge slice; z varies over time to reveal layers
+    vec2 pNorm2 = z / max(1e-6, u_span) + vec2(0.5);
+    float zSlice = 0.5 + 0.45 * sin(u_time * 0.25);
+    vec3 p3 = vec3(pNorm2, zSlice);
+    float t = mengerDepth(p3);
+    float shade = 1.0 - t;
+    col = getPalette(shade, u_palette);
+  } else if (u_fractalType == 4) {
+    // 3D: Sierpinski Pyramid slice
+    vec2 pNorm2 = z / max(1e-6, u_span) + vec2(0.5);
+    float zSlice = 0.5 + 0.45 * sin(u_time * 0.22 + 1.0);
+    vec3 p3 = vec3(pNorm2, zSlice);
+    float t = sierpinskiPyramidDepth(p3);
+    float shade = 1.0 - t;
+    col = getPalette(shade, u_palette);
   } else {
-    // Smooth iteration count
-    float r = length(z);
-    float nu = i - log2(log2(max(r, 1.001))) + 4.0;
-    colorT = nu / float(maxIter);
+    // Overlay-only types: neutral background
+    col = vec3(0.0);
   }
-
-  // Subtle modulation by orbit trap to add detail
-  colorT = clamp(colorT + 0.15 * exp(-3.0*trap), 0.0, 1.0);
-  vec3 col = getPalette(colorT, u_palette);
 
   // Vignette for aesthetics
   float d = length(uv);
@@ -259,6 +365,7 @@ void main() {
     uniforms.u_time = gl.getUniformLocation(program, 'u_time');
     uniforms.u_maxIter = gl.getUniformLocation(program, 'u_maxIter');
     uniforms.u_palette = gl.getUniformLocation(program, 'u_palette');
+    uniforms.u_fractalType = gl.getUniformLocation(program, 'u_fractalType');
 
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.CULL_FACE);
@@ -276,6 +383,11 @@ void main() {
       canvas.height = h;
       gl.viewport(0, 0, w, h);
       needsRender = true;
+      if (overlay) {
+        overlay.width = w;
+        overlay.height = h;
+        overlayNeedsRender = true;
+      }
     }
   }
 
@@ -295,6 +407,259 @@ void main() {
     gl.uniform1f(uniforms.u_time, timeSec * state.speed);
     gl.uniform1i(uniforms.u_maxIter, state.maxIter|0);
     gl.uniform1i(uniforms.u_palette, state.palette|0);
+    gl.uniform1i(uniforms.u_fractalType, state.fractalType|0);
+  }
+
+  // ----- Overlay 2D drawing (for line/tree/L-system fractals) -----
+  function clearOverlay() {
+    if (!overlayCtx || !overlay) return;
+    overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+  }
+
+  function rot2(a) {
+    const c = Math.cos(a), s = Math.sin(a);
+    return [c, -s, s, c];
+  }
+
+  function applyMat2(m, v) { return { x: m[0]*v.x + m[1]*v.y, y: m[2]*v.x + m[3]*v.y }; }
+
+  // Map normalized coords [0,1]x[0,1] to plane world point, mirroring shader mapping
+  function worldFromNorm(nx, ny) {
+    // Build uv in [-1,1]
+    const aspect = canvas.width / Math.max(1, canvas.height);
+    let uvx = (nx * 2 - 1) * aspect;
+    let uvy = (ny * 2 - 1);
+    const a = state.rotationDeg * Math.PI / 180;
+    const m = rot2(a);
+    const r = applyMat2(m, { x: uvx, y: uvy });
+    const span = BASE_SPAN * state.scale;
+    return { x: r.x * (span * 0.5) + state.center.x, y: r.y * (span * 0.5) + state.center.y };
+  }
+
+  // Map plane world point back to overlay pixel
+  function planeToScreen(px, py) {
+    const span = BASE_SPAN * state.scale;
+    const a = state.rotationDeg * Math.PI / 180;
+    const inv = rot2(-a);
+    // Remove center
+    const dx = px - state.center.x;
+    const dy = py - state.center.y;
+    const pre = applyMat2(inv, { x: dx / (span * 0.5), y: dy / (span * 0.5) });
+    // Undo aspect scaling on x
+    const aspect = canvas.width / Math.max(1, canvas.height);
+    const uvx = pre.x / Math.max(1e-6, aspect);
+    const uvy = pre.y;
+    const sx = (uvx + 1) * 0.5 * canvas.width;
+    const sy = (uvy + 1) * 0.5 * canvas.height;
+    return { x: sx, y: sy };
+  }
+
+  function pathMoveToNorm(nx, ny) {
+    const w = worldFromNorm(nx, ny);
+    const s = planeToScreen(w.x, w.y);
+    overlayCtx.moveTo(s.x, s.y);
+  }
+  function pathLineToNorm(nx, ny) {
+    const w = worldFromNorm(nx, ny);
+    const s = planeToScreen(w.x, w.y);
+    overlayCtx.lineTo(s.x, s.y);
+  }
+
+  function drawKoch(iter) {
+    if (!overlayCtx) return;
+    iter = Math.max(0, Math.min(6, iter|0));
+    // Generate via L-system
+    let str = 'F';
+    for (let i = 0; i < iter; i++) {
+      let next = '';
+      for (const ch of str) {
+        if (ch === 'F') next += 'F+F--F+F'; else next += ch;
+      }
+      str = next;
+    }
+    const angle = Math.PI / 3; // 60°
+    let x = 0.1, y = 0.5, dir = 0;
+    const len = 0.8 / Math.pow(3, iter);
+    overlayCtx.save();
+    overlayCtx.lineWidth = Math.max(1, Math.floor(2 * dpr));
+    overlayCtx.strokeStyle = '#eaeaea';
+    overlayCtx.beginPath();
+    pathMoveToNorm(x, y);
+    for (const ch of str) {
+      if (ch === 'F') {
+        x += Math.cos(dir) * len;
+        y += Math.sin(dir) * len;
+        pathLineToNorm(x, y);
+      } else if (ch === '+') dir += angle; else if (ch === '-') dir -= angle;
+    }
+    overlayCtx.stroke();
+    overlayCtx.restore();
+  }
+
+  function buildHilbertString(n) {
+    let s = 'A';
+    for (let i = 0; i < n; i++) {
+      let next = '';
+      for (const ch of s) {
+        if (ch === 'A') next += '+BF-AFA-FB+';
+        else if (ch === 'B') next += '-AF+BFB+FA-';
+        else next += ch;
+      }
+      s = next;
+    }
+    return s;
+  }
+
+  // Classic Peano (3x3) curve via L-system
+  function buildPeanoString(n) {
+    let s = 'L';
+    for (let i = 0; i < n; i++) {
+      let next = '';
+      for (const ch of s) {
+        if (ch === 'L') next += 'LFRFL-F-RFLFR+F+LFRFL';
+        else if (ch === 'R') next += 'RFLFR+F+LFRFL-F-RFLFR';
+        else next += ch;
+      }
+      s = next;
+    }
+    return s;
+  }
+
+  function drawPeano(iter) {
+    if (!overlayCtx) return;
+    iter = Math.max(1, Math.min(5, iter|0));
+    const s = buildPeanoString(iter - 1);
+    const angle = Math.PI / 2;
+    const len = 0.8 / Math.pow(3, iter - 1);
+    let x = 0.1, y = 0.1, dir = 0; // start at bottom-left
+    overlayCtx.save();
+    overlayCtx.lineWidth = Math.max(1, Math.floor(2 * dpr));
+    overlayCtx.strokeStyle = '#eaeaea';
+    overlayCtx.beginPath();
+    pathMoveToNorm(x, y);
+    for (const ch of s) {
+      if (ch === 'F') {
+        x += Math.cos(dir) * len;
+        y += Math.sin(dir) * len;
+        pathLineToNorm(x, y);
+      } else if (ch === '+') dir += angle; else if (ch === '-') dir -= angle;
+    }
+    overlayCtx.stroke();
+    overlayCtx.restore();
+  }
+
+  function drawTree(iter) {
+    if (!overlayCtx) return;
+    iter = Math.max(1, Math.min(12, iter|0));
+    const stack = [];
+    const axiom = 'X';
+    const rules = {
+      'X': 'F-[[X]+X]+F[+FX]-X',
+      'F': 'FF'
+    };
+    // Build string up to smaller iterations to avoid explosion
+    let s = axiom;
+    const maxI = Math.min(5, iter);
+    for (let i = 0; i < maxI; i++) {
+      let next = '';
+      for (const ch of s) {
+        next += (rules[ch] || ch);
+      }
+      s = next;
+    }
+    // Turtle
+    let x = 0.5, y = 0.95, dir = -Math.PI/2; // start at bottom center upwards
+    const step = 0.02 * Math.max(1, iter - 2);
+    overlayCtx.save();
+    overlayCtx.lineWidth = Math.max(1, Math.floor(1.5 * dpr));
+    overlayCtx.strokeStyle = '#eaeaea';
+    overlayCtx.beginPath();
+    pathMoveToNorm(x, y);
+    for (const ch of s) {
+      if (ch === 'F') {
+        const nx = x + Math.cos(dir) * step;
+        const ny = y + Math.sin(dir) * step;
+        pathLineToNorm(nx, ny);
+        x = nx; y = ny;
+      } else if (ch === '+') dir += Math.PI/7; // ~25.7°
+      else if (ch === '-') dir -= Math.PI/7;
+      else if (ch === '[') stack.push({ x, y, dir });
+      else if (ch === ']') {
+        const st = stack.pop();
+        if (!st) continue;
+        x = st.x; y = st.y; dir = st.dir;
+        overlayCtx.moveTo(planeToScreen(worldFromNorm(x,y).x, worldFromNorm(x,y).y).x, planeToScreen(worldFromNorm(x,y).x, worldFromNorm(x,y).y).y);
+      }
+    }
+    overlayCtx.stroke();
+    overlayCtx.restore();
+  }
+
+  function drawPythagoras(iter) {
+    if (!overlayCtx) return;
+    const depth = Math.max(1, Math.min(10, iter|0));
+    overlayCtx.save();
+    overlayCtx.lineWidth = Math.max(1, Math.floor(1.2 * dpr));
+    overlayCtx.strokeStyle = '#eaeaea';
+    overlayCtx.fillStyle = 'rgba(255,255,255,0.08)';
+
+    function drawSquare(center, side, angle) {
+      const ex = { x: Math.cos(angle) * (side/2), y: Math.sin(angle) * (side/2) };
+      const ey = { x: -Math.sin(angle) * (side/2), y: Math.cos(angle) * (side/2) };
+      const p1 = { x: center.x - ex.x - ey.x, y: center.y - ex.y - ey.y }; // bottom-left
+      const p2 = { x: center.x + ex.x - ey.x, y: center.y + ex.y - ey.y }; // bottom-right
+      const p3 = { x: center.x + ex.x + ey.x, y: center.y + ex.y + ey.y }; // top-right
+      const p4 = { x: center.x - ex.x + ey.x, y: center.y - ex.y + ey.y }; // top-left
+      const s1 = planeToScreen(worldFromNorm(p1.x, p1.y).x, worldFromNorm(p1.x, p1.y).y);
+      const s2 = planeToScreen(worldFromNorm(p2.x, p2.y).x, worldFromNorm(p2.x, p2.y).y);
+      const s3 = planeToScreen(worldFromNorm(p3.x, p3.y).x, worldFromNorm(p3.x, p3.y).y);
+      const s4 = planeToScreen(worldFromNorm(p4.x, p4.y).x, worldFromNorm(p4.x, p4.y).y);
+      overlayCtx.beginPath();
+      overlayCtx.moveTo(s1.x, s1.y);
+      overlayCtx.lineTo(s2.x, s2.y);
+      overlayCtx.lineTo(s3.x, s3.y);
+      overlayCtx.lineTo(s4.x, s4.y);
+      overlayCtx.closePath();
+      overlayCtx.fill();
+      overlayCtx.stroke();
+      return { p1, p2, p3, p4 };
+    }
+
+    function rec(center, side, angle, d) {
+      const corners = drawSquare(center, side, angle);
+      if (d <= 0) return;
+      const childSide = side / Math.SQRT2;
+      const angleL = angle - Math.PI/4;
+      const angleR = angle + Math.PI/4;
+      const exL = { x: Math.cos(angleL) * (childSide/2), y: Math.sin(angleL) * (childSide/2) };
+      const eyL = { x: -Math.sin(angleL) * (childSide/2), y: Math.cos(angleL) * (childSide/2) };
+      const exR = { x: Math.cos(angleR) * (childSide/2), y: Math.sin(angleR) * (childSide/2) };
+      const eyR = { x: -Math.sin(angleR) * (childSide/2), y: Math.cos(angleR) * (childSide/2) };
+      // centers from top-left and top-right corners respectively
+      const cL = { x: corners.p4.x + exL.x - eyL.x, y: corners.p4.y + exL.y - eyL.y };
+      const cR = { x: corners.p3.x - exR.x - eyR.x, y: corners.p3.y - exR.y - eyR.y };
+      rec(cL, childSide, angleL, d - 1);
+      rec(cR, childSide, angleR, d - 1);
+    }
+
+    const baseSide = 0.18; // normalized units in [0,1]
+    const baseCenter = { x: 0.5, y: 0.1 + baseSide/2 };
+    rec(baseCenter, baseSide, 0, depth - 1);
+    overlayCtx.restore();
+  }
+
+  function drawOverlay() {
+    if (!overlayCtx || !overlay) return;
+    clearOverlay();
+    if (state.fractalType === 5) {
+      drawKoch(state.maxIter);
+    } else if (state.fractalType === 6) {
+      drawPeano(state.maxIter);
+    } else if (state.fractalType === 7) {
+      drawPythagoras(state.maxIter);
+    } else if (state.fractalType === 8) {
+      drawTree(state.maxIter);
+    }
   }
 
   function render() {
@@ -303,6 +668,11 @@ void main() {
     gl.clear(gl.COLOR_BUFFER_BIT);
     setUniforms();
     gl.drawArrays(gl.TRIANGLES, 0, 6);
+    if (state.fractalType >= 5) {
+      drawOverlay();
+    } else if (overlayCtx) {
+      clearOverlay();
+    }
   }
 
   let rafId = 0;
@@ -328,6 +698,78 @@ void main() {
 
   // UI wiring
   function bindUI() {
+    function applyFractalDefaults(type) {
+      if (type === 0) {
+        // Julia
+        state.maxIter = 200;
+        state.scale = 1.0;
+        state.rotationDeg = 0;
+        state.center = { x: -0.2, y: 0.0 };
+      } else if (type === 1) {
+        // Sierpinski Triangle
+        state.maxIter = 9;
+        state.scale = 1.2;
+        state.rotationDeg = 0;
+        state.center = { x: 0.0, y: 0.0 };
+      } else if (type === 2) {
+        // Sierpinski Carpet
+        state.maxIter = 6;
+        state.scale = 1.0;
+        state.rotationDeg = 0;
+        state.center = { x: 0.0, y: 0.0 };
+      } else if (type === 3) {
+        // Menger Sponge slice
+        state.maxIter = 5;
+        state.scale = 1.0;
+        state.rotationDeg = 0;
+        state.center = { x: 0.0, y: 0.0 };
+      } else if (type === 4) {
+        // Sierpinski Pyramid slice
+        state.maxIter = 9;
+        state.scale = 1.0;
+        state.rotationDeg = 0;
+        state.center = { x: 0.0, y: 0.0 };
+      } else if (type === 5) {
+        // Koch curve
+        state.maxIter = 4;
+        state.scale = 1.0;
+        state.rotationDeg = 0;
+        state.center = { x: 0.0, y: 0.0 };
+      } else if (type === 6) {
+        // Peano/Hilbert curve
+        state.maxIter = 5;
+        state.scale = 1.0;
+        state.rotationDeg = 0;
+        state.center = { x: 0.0, y: 0.0 };
+      } else if (type === 7) {
+        // Pythagoras tree
+        state.maxIter = 9;
+        state.scale = 1.0;
+        state.rotationDeg = 0;
+        state.center = { x: 0.0, y: 0.0 };
+      } else if (type === 8) {
+        // L-system plant
+        state.maxIter = 6;
+        state.scale = 1.0;
+        state.rotationDeg = 0;
+        state.center = { x: 0.0, y: 0.0 };
+      }
+      // Reflect in UI controls
+      ui.iterations.value = String(state.maxIter);
+      ui.zoom.value = String(state.scale);
+      ui.rotation.value = String(state.rotationDeg);
+      updateUI();
+    }
+
+    if (ui.fractal) {
+      ui.fractal.addEventListener('input', (e) => {
+        const t = parseInt(e.target.value, 10) | 0;
+        if (t === state.fractalType) return;
+        state.fractalType = t;
+        applyFractalDefaults(t);
+        needsRender = true;
+      });
+    }
     ui.palette.addEventListener('input', (e) => {
       state.palette = parseInt(e.target.value, 10);
       needsRender = true; updateUI();
@@ -356,7 +798,8 @@ void main() {
       needsRender = true;
     });
     ui.reset.addEventListener('click', () => {
-      Object.assign(state, { palette: 0, maxIter: 200, scale: 1.0, rotationDeg: 0, speed: 1.0, playing: true, center: { x: -0.2, y: 0.0 } });
+      Object.assign(state, { fractalType: 0, palette: 0, maxIter: 200, scale: 1.0, rotationDeg: 0, speed: 1.0, playing: true, center: { x: -0.2, y: 0.0 } });
+      if (ui.fractal) ui.fractal.value = String(state.fractalType);
       ui.palette.value = String(state.palette);
       ui.iterations.value = String(state.maxIter);
       ui.zoom.value = String(state.scale);
@@ -366,6 +809,17 @@ void main() {
       ui.playPause.setAttribute('aria-pressed', 'true');
       needsRender = true; updateUI();
     });
+
+    // Recenter: reset only the view center to the default for current fractal
+    if (ui.recenter) {
+      ui.recenter.addEventListener('click', () => {
+        const defCenter = (state.fractalType === 0)
+          ? { x: -0.2, y: 0.0 } // Julia default view
+          : { x: 0.0, y: 0.0 };
+        state.center = { x: defCenter.x, y: defCenter.y };
+        needsRender = true;
+      });
+    }
   }
 
   // Pointer interactions: pan, zoom, recenter
@@ -434,19 +888,10 @@ void main() {
   }
 
   function onDblClick(e) {
-    const rect = canvas.getBoundingClientRect();
-    const px = (e.clientX - rect.left) * dpr;
-    const py = (e.clientY - rect.top) * dpr;
-    const aspect = canvas.width / Math.max(1, canvas.height);
-    const uv = { x: (px / canvas.width) * 2 - 1, y: (py / canvas.height) * 2 - 1 };
-    uv.x *= aspect;
-    const a = state.rotationDeg * Math.PI / 180;
-    const rx = Math.cos(a) * uv.x - Math.sin(a) * uv.y;
-    const ry = Math.sin(a) * uv.x + Math.cos(a) * uv.y;
-    const span = BASE_SPAN * state.scale;
-    state.center.x = rx * (span * 0.5) + state.center.x;
-    state.center.y = ry * (span * 0.5) + state.center.y;
-    needsRender = true;
+    // Toggle settings panel visibility instead of recentering
+    e.preventDefault();
+    const hidden = ui.controls && ui.controls.classList.contains('hidden');
+    setControlsHidden(!hidden);
   }
 
   // Touch: pinch to zoom, one-finger pan
@@ -524,6 +969,7 @@ void main() {
     }
 
     // Initialize UI defaults
+    if (ui.fractal) ui.fractal.value = String(state.fractalType);
     ui.palette.value = String(state.palette);
     ui.iterations.value = String(state.maxIter);
     ui.zoom.value = String(state.scale);

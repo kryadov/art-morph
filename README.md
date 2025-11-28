@@ -1,6 +1,6 @@
 # Art Morph — GPU Fractal & Ornaments
 
-Interactive WebGL (WebGL1) demo that renders animated Julia fractals with palettes inspired by Khokhloma and Gzhel, plus a rainbow mode. Includes mouse/touch interactions: zoom, pan, rotation, iterations, speed.
+Interactive WebGL (WebGL1) demo that renders multiple fractal types (GPU and 2D overlay) with palettes inspired by Khokhloma and Gzhel, plus a rainbow mode. Includes mouse/touch interactions: zoom, pan, rotation, iterations, speed.
 
 ![img.png](img.png)
 
@@ -137,25 +137,32 @@ Then in Settings → Pages, set Source to “GitHub Actions”.
 ## Project layout
 
 - `index.html` — page template (keeps script and asset links relative for Pages)
-- `js/app.js` — main WebGL application
+- `js/app.js` — main WebGL application and overlay 2D renderer for line/tree fractals
 - `css/style.css` — styles
 - `img/`, `icon.svg`, `icon.png`, `favicon.ico`, `site.webmanifest`, `404.html`, `robots.txt` — static assets; copied to `dist/` during build
 - `webpack.*.js` — build configuration
 
 ## Controls (in the UI)
 
+- Fractal: choose fractal type
+  - Linear: Koch curve, Peano (3×3)
+  - Planar (shader): Sierpinski triangle, Sierpinski carpet
+  - Volumetric (sliced in 2D): Menger sponge, Sierpinski pyramid
+  - Tree‑like: Pythagoras tree, generic L‑system plant
 - Palette: switch color schemes
-- Iterations: fractal iteration count
+- Iterations: fractal depth/iteration count (meaning depends on type)
 - Zoom: scale in/out
-- Rotation: rotate the complex plane
-- Speed: animation speed; Pause/Reset buttons
-- Interactions: drag to pan, scroll to zoom, double‑click to recenter; on touch, pinch to zoom
+- Rotation: rotate the view/plane
+- Speed: animation speed (affects Julia morphing and 3D slice animation); Pause/Reset buttons
+- Recenter: button to reset the view center to the default for the current fractal
+- Interactions: drag to pan, scroll to zoom; double‑click the canvas to toggle the Settings panel; on touch, pinch to zoom
 
 ## Troubleshooting
 
 - Blank screen or error about WebGL: your browser/device may not support WebGL 1. Try a different browser or update your drivers.
 - On GitHub Pages under a subpath, assets 404: make sure you’re visiting the full project URL (`https://<user>.github.io/<repo>/`), not just `https://<user>.github.io/`. All links are relative, so they should work as long as the base URL includes the repo path.
 - Double script inclusion (advanced): If you add additional HtmlWebpackPlugin instances or change template settings, ensure the bundle isn’t injected twice. In this repo, the production build uses your `index.html` template and references `js/app.js` directly.
+- Overlay not visible for line/tree fractals: ensure the `#overlay2d` canvas is present in `index.html` and not hidden by CSS; it’s drawn above the WebGL canvas and has `pointer-events: none`.
 
 ## License
 
