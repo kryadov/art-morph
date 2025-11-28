@@ -2,6 +2,8 @@
 
 Interactive WebGL (WebGL1) demo that renders animated Julia fractals with palettes inspired by Khokhloma and Gzhel, plus a rainbow mode. Includes mouse/touch interactions: zoom, pan, rotation, iterations, speed.
 
+![img.png](img.png)
+
 This repository contains a small webpack setup for local development, production builds, and easy publishing to GitHub Pages.
 
 ## Demo (after you publish)

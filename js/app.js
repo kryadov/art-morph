@@ -13,6 +13,7 @@
 
   // UI elements
   const ui = {
+    controls: $('#controls'),
     palette: $('#palette'),
     iterations: $('#iterations'),
     zoom: $('#zoom'),
@@ -49,6 +50,21 @@
   let lastT = performance.now();
   let timeSec = 0; // accumulated time in seconds (paused respects state.playing)
   let needsRender = true;
+
+  // Settings panel visibility persistence key
+  const LS_KEY_CONTROLS_HIDDEN = 'ui.controlsHidden';
+
+  function setControlsHidden(hidden) {
+    const el = ui.controls;
+    if (!el) return;
+    el.classList.toggle('hidden', !!hidden);
+    el.setAttribute('aria-hidden', hidden ? 'true' : 'false');
+    try { localStorage.setItem(LS_KEY_CONTROLS_HIDDEN, hidden ? '1' : '0'); } catch (_) { /* ignore */ }
+  }
+
+  function getControlsHidden() {
+    try { return localStorage.getItem(LS_KEY_CONTROLS_HIDDEN) === '1'; } catch (_) { return false; }
+  }
 
   function createGL() {
     const options = { antialias: false, preserveDrawingBuffer: false, alpha: false, powerPreference: 'high-performance' };
@@ -476,6 +492,19 @@ void main() {
 
   window.addEventListener('resize', () => { needsRender = true; });
 
+  // Keyboard: toggle settings panel visibility with 'h'
+  document.addEventListener('keydown', (e) => {
+    if (e.defaultPrevented) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const ae = document.activeElement;
+    const tag = ae && ae.tagName ? ae.tagName.toUpperCase() : '';
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || (ae && ae.isContentEditable)) return;
+    if (e.key === 'h' || e.key === 'H') {
+      const hidden = ui.controls && ui.controls.classList.contains('hidden');
+      setControlsHidden(!hidden);
+    }
+  });
+
   function showFallback(msg) {
     if (fallbackEl) {
       fallbackEl.classList.remove('hidden');
@@ -502,6 +531,9 @@ void main() {
     ui.speed.value = String(state.speed);
     updateUI();
     bindUI();
+
+    // Apply persisted controls visibility state
+    setControlsHidden(getControlsHidden());
 
     // Fit canvas to viewport initially
     canvas.style.width = '100%';
