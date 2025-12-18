@@ -25,6 +25,10 @@
     playPause: $('#playPause'),
     reset: $('#reset'),
     recenter: $('#recenter'),
+    // Music controls
+    musicFile: $('#musicFile'),
+    musicPlay: $('#musicPlay'),
+    musicStop: $('#musicStop'),
     iterationsValue: $('#iterationsValue'),
     zoomValue: $('#zoomValue'),
     rotationValue: $('#rotationValue'),
@@ -58,6 +62,20 @@
   let overlayNeedsRender = true;
   // State for stochastic overlay fractals (e.g., Barnsley fern)
   let fernState = { x: 0, y: 0, ready: false };
+
+  // ----- Music playback (user-chosen MP3) -----
+  let music = new Audio();
+  music.loop = true;
+  let musicObjectUrl = null;
+
+  // Cleanup on page unload
+  window.addEventListener('beforeunload', () => {
+    try { music.pause(); } catch (_) { /* noop */ }
+    if (musicObjectUrl) {
+      try { URL.revokeObjectURL(musicObjectUrl); } catch (_) { /* ignore */ }
+      musicObjectUrl = null;
+    }
+  });
 
   // Settings panel visibility persistence key
   const LS_KEY_CONTROLS_HIDDEN = 'ui.controlsHidden';
@@ -934,6 +952,62 @@ void main() {
         needsRender = true;
       });
     }
+
+    // ----- Music UI -----
+    function updateMusicUI() {
+      const hasSrc = !!music.src;
+      if (ui.musicPlay) {
+        ui.musicPlay.disabled = !hasSrc;
+        ui.musicPlay.setAttribute('aria-pressed', String(hasSrc && !music.paused));
+      }
+      if (ui.musicStop) {
+        ui.musicStop.disabled = !hasSrc;
+        ui.musicStop.setAttribute('aria-pressed', 'false');
+      }
+    }
+
+    if (ui.musicFile) {
+      ui.musicFile.addEventListener('change', () => {
+        const f = ui.musicFile.files && ui.musicFile.files[0];
+        if (!f) return;
+        try { music.pause(); } catch (_) { /* noop */ }
+        music.currentTime = 0;
+        if (musicObjectUrl) {
+          try { URL.revokeObjectURL(musicObjectUrl); } catch (_) { /* ignore */ }
+          musicObjectUrl = null;
+        }
+        musicObjectUrl = URL.createObjectURL(f);
+        music.src = musicObjectUrl;
+        updateMusicUI();
+      });
+    }
+
+    if (ui.musicPlay) {
+      ui.musicPlay.addEventListener('click', () => {
+        if (!music.src) return;
+        const p = music.play();
+        if (p && typeof p.then === 'function') {
+          p.then(() => updateMusicUI()).catch((err) => {
+            console.warn('Music play failed:', err);
+            updateMusicUI();
+          });
+        } else {
+          updateMusicUI();
+        }
+      });
+    }
+
+    if (ui.musicStop) {
+      ui.musicStop.addEventListener('click', () => {
+        if (!music.src) return;
+        try { music.pause(); } catch (_) { /* noop */ }
+        try { music.currentTime = 0; } catch (_) { /* noop */ }
+        updateMusicUI();
+      });
+    }
+
+    music.addEventListener('play', updateMusicUI);
+    music.addEventListener('pause', updateMusicUI);
   }
 
   // Pointer interactions: pan, zoom, recenter
