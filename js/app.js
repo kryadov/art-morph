@@ -298,7 +298,63 @@ vec3 colorDynamicMorph(vec3 p) {
     if (i >= u_maxIter) break;
     q = abs(q) / dot(q, q) - vec3(0.5 + 0.3*sin(t), 0.5 + 0.3*cos(t), 0.5 + 0.3*sin(t*1.2));
   }
-  return getPalette(length(q), u_palette);
+  float colorT = fract(length(q) * 0.2);
+  colorT = 1.0 - abs(colorT * 2.0 - 1.0);
+  return getPalette(colorT, u_palette);
+}
+
+// Star Journey (3D Raymarching)
+vec3 colorStarJourney(vec2 uv) {
+  // Camera flies forward: 0.5 (was 1.5) for 3x slower movement
+  vec3 ro = vec3(0.0, 0.0, u_time * 0.5);
+  vec3 rd = normalize(vec3(uv, 1.0));
+
+  // Rotate camera
+  float a = u_time * 0.1;
+  rd.xy *= rot(a);
+  rd.xz *= rot(a * 0.7);
+
+  float t = 0.0;
+  float minOrbit = 1e10;
+  int steps = 0;
+
+  // Pre-calculate animation offset
+  vec3 shift = vec3(0.5 * sin(u_time * 0.2), 0.3 * cos(u_time * 0.3), 0.0);
+
+  for (int i = 0; i < 60; i++) {
+    steps = i;
+    vec3 p = ro + rd * t;
+    // Repeat space
+    vec3 q = mod(p + 4.0, 8.0) - 4.0;
+
+    // Fractal DE: Simple recursive folding
+    float s = 1.0;
+    for (int j = 0; j < 5; j++) {
+      if (j >= u_maxIter / 2) break;
+      q = abs(q) - 1.2;
+      float r2 = dot(q, q);
+      minOrbit = min(minOrbit, r2);
+      float k = 2.0 / clamp(r2, 0.1, 1.5);
+      q *= k;
+      s *= k;
+      q += shift;
+    }
+    float d = (length(q) - 0.2) / s;
+    if (d < 0.001 || t > 40.0) break;
+    t += d * 0.7;
+  }
+
+  // Use minOrbit for smooth coloring. Log scale to compress the range and mirror palette.
+  float colorT = fract(log(1.0 + minOrbit) * 0.5 + u_time * 0.04);
+  colorT = 1.0 - abs(colorT * 2.0 - 1.0);
+  vec3 col = getPalette(colorT, u_palette);
+
+  // Simple lighting / fog
+  col *= 1.0 / (1.0 + t * t * 0.015);
+  // Soft glow based on steps
+  col += (float(steps) / 60.0) * 0.15 * col;
+
+  return col;
 }
 
 void main() {
@@ -347,15 +403,21 @@ void main() {
     float zSlice = 0.5 + 0.45 * sin(u_time * 0.22 + 1.0);
     vec3 p3 = vec3(pNorm2, zSlice);
     col = colorDynamicMorph(p3);
+  } else if (u_fractalType == 12) {
+    col = colorStarJourney(uv);
   } else {
     // Overlay-only types: neutral background
     col = vec3(0.0);
   }
 
   // Vignette for aesthetics
-  float d = length(uv);
-  float vig = smoothstep(1.2, 0.2, d);
+  float d_vig = length(uv);
+  float vig = smoothstep(1.2, 0.2, d_vig);
   col *= mix(0.85, 1.0, vig);
+
+  // Dithering to hide banding in smooth gradients
+  float noise = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+  col += (noise - 0.5) * (1.0 / 255.0);
 
   gl_FragColor = vec4(col, 1.0);
 }`;
@@ -425,7 +487,10 @@ void main() {
 
   function resizeCanvas() {
     const rect = canvas.getBoundingClientRect();
-    const newDpr = Math.min(window.devicePixelRatio || 1, 2);
+    // Reduce resolution for heavy 3D shaders to save GPU
+    let dprLimit = 2;
+    if (state.fractalType === 12) dprLimit = 1.25;
+    const newDpr = Math.min(window.devicePixelRatio || 1, dprLimit);
     if (newDpr !== dpr) dpr = newDpr;
     const w = Math.max(1, Math.floor(rect.width * dpr));
     const h = Math.max(1, Math.floor(rect.height * dpr));
@@ -878,7 +943,13 @@ void main() {
         state.center = { x: 0.0, y: 0.0 };
       } else if (type === 11) {
         // Dynamic Morph
-        state.maxIter = 10;
+        state.maxIter = 8;
+        state.scale = 1.0;
+        state.rotationDeg = 0;
+        state.center = { x: 0.0, y: 0.0 };
+      } else if (type === 12) {
+        // Star Journey
+        state.maxIter = 8; // Controls folding depth
         state.scale = 1.0;
         state.rotationDeg = 0;
         state.center = { x: 0.0, y: 0.0 };
