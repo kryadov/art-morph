@@ -125,7 +125,7 @@ uniform float u_rotation;   // radians
 uniform float u_time;       // seconds
 uniform int u_maxIter;
 uniform int u_palette;      // 0=Khokhloma,1=Gzhel,2=Rainbow,3=Sunset,4=Forest,5=Ocean,6=Neon,7=Monochrome
-uniform int u_fractalType;  // 0=Julia,1=Tri,2=Carpet,13=Liquid
+uniform int u_fractalType;  // 0=Julia,1=Tri,2=Carpet,13=Liquid,14=Web3D
 
 // Utility: rotate 2D vector
 mat2 rot(float a) {
@@ -401,6 +401,27 @@ vec3 colorDynamicMorph(vec3 p) {
   return getPalette(colorT, u_palette);
 }
 
+// 3D Web (Iterative network with gradient)
+vec3 colorWeb3D(vec3 p) {
+  vec3 q = p;
+  float t = u_time * 0.15;
+  float minD = 1000.0;
+  for (int i = 0; i < 16; i++) {
+    if (i >= u_maxIter) break;
+    q = abs(q) - vec3(0.4, 0.4, 0.4);
+    float s = sin(t + float(i)*0.1);
+    float c = cos(t + float(i)*0.1);
+    q.xy = mat2(c, -s, s, c) * q.xy;
+    q.xz = mat2(c, -s, s, c) * q.xz;
+    q = q * 1.5 - vec3(0.2 * sin(t * 0.5));
+    // Orbit trap for web-like filaments
+    float dist = min(abs(q.x), min(abs(q.y), abs(q.z)));
+    minD = min(minD, dist);
+  }
+  float colorT = fract(log(1.0 + minD * 100.0) * 0.4 + t);
+  return getPalette(colorT, u_palette);
+}
+
 // Star Journey (3D Raymarching)
 vec3 colorStarJourney(vec2 uv) {
   // Camera flies forward: 0.5 (was 1.5) for 3x slower movement
@@ -505,6 +526,11 @@ void main() {
     col = colorStarJourney(uv);
   } else if (u_fractalType == 13) {
     col = colorLiquid(z);
+  } else if (u_fractalType == 14) {
+    vec2 pNorm2 = z / max(1e-6, u_span) + vec2(0.5);
+    float zSlice = 0.5 + 0.4 * sin(u_time * 0.2);
+    vec3 p3 = vec3(pNorm2, zSlice);
+    col = colorWeb3D(p3);
   } else {
     // Overlay-only types: neutral background
     col = vec3(0.0);
@@ -1056,6 +1082,12 @@ void main() {
       } else if (type === 13) {
         // Liquid Gradient
         state.maxIter = 30;
+        state.scale = 1.0;
+        state.rotationDeg = 0;
+        state.center = { x: 0.0, y: 0.0 };
+      } else if (type === 14) {
+        // 3D Web (gradient)
+        state.maxIter = 10;
         state.scale = 1.0;
         state.rotationDeg = 0;
         state.center = { x: 0.0, y: 0.0 };
