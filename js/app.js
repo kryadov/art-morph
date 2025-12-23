@@ -6,6 +6,9 @@
   - Responsive HiDPI canvas with context loss handling
 */
 
+import { fractals, getFractalById } from './fractals/index.js';
+import { noiseGLSL } from './fractals/utils.js';
+
 (() => {
   const $ = (sel) => document.querySelector(sel);
   const canvas = document.getElementById('glcanvas');
@@ -115,7 +118,50 @@ void main() {
   gl_Position = vec4(a_position, 0.0, 1.0);
 }`;
 
-  const FRAG_SRC = `
+  // Generate FRAG_SRC dynamically based on imported fractals
+  const generateFragSrc = () => {
+    const shaderFractals = fractals.filter(f => f.type === 'shader');
+    const fractalFunctions = shaderFractals.map(f => f.glsl).join('\n');
+
+    const fractalCases = shaderFractals.map(f => `
+  } else if (u_fractalType == ${f.id}) {
+    ${f.id === 1 || f.id === 2 ? `
+    vec2 pNorm = z / max(1e-6, u_span) + vec2(0.5);
+    float t = ${f.id === 1 ? 'sierpinskiTri' : 'sierpinskiCarpet'}(pNorm);
+    float shade = 1.0 - t;
+    col = getPalette(shade, u_palette);
+    ` : f.id === 3 ? `
+    vec2 pNorm2 = z / max(1e-6, u_span) + vec2(0.5);
+    float zSlice = 0.5 + 0.45 * sin(u_time * 0.25);
+    vec3 p3 = vec3(pNorm2, zSlice);
+    float t = mengerDepth(p3);
+    float shade = 1.0 - t;
+    col = getPalette(shade, u_palette);
+    ` : f.id === 4 ? `
+    vec2 pNorm2 = z / max(1e-6, u_span) + vec2(0.5);
+    float zSlice = 0.5 + 0.45 * sin(u_time * 0.22 + 1.0);
+    vec3 p3 = vec3(pNorm2, zSlice);
+    float t = sierpinskiPyramidDepth(p3);
+    float shade = 1.0 - t;
+    col = getPalette(shade, u_palette);
+    ` : f.id === 11 ? `
+    vec2 pNorm2 = z / max(1e-6, u_span) + vec2(0.5);
+    float zSlice = 0.5 + 0.45 * sin(u_time * 0.22 + 1.0);
+    vec3 p3 = vec3(pNorm2, zSlice);
+    col = colorDynamicMorph(p3);
+    ` : f.id === 14 ? `
+    vec2 pNorm2 = z / max(1e-6, u_span) + vec2(0.5);
+    float zSlice = 0.5 + 0.4 * sin(u_time * 0.2);
+    vec3 p3 = vec3(pNorm2, zSlice);
+    col = colorWeb3D(p3);
+    ` : f.id === 12 || f.id === 15 ? `
+    col = ${f.id === 12 ? 'colorStarJourney' : 'colorStar3D'}(uv);
+    ` : `
+    col = ${f.id === 0 ? 'colorJulia' : f.id === 10 ? 'colorPlasma' : f.id === 13 ? 'colorLiquid' : 'colorEnergyCore'}(z);
+    `}
+    `).join('');
+
+    return `
 precision highp float;
 
 uniform vec2 u_resolution;  // canvas size in pixels
@@ -236,308 +282,9 @@ vec3 getPalette(float t, int which) {
   return paletteMonochrome(t); // 7
 }
 
-// Compute color for Julia set at point z0
-vec3 colorJulia(vec2 z0) {
-  vec2 z = z0;
-  // Animate c over time to morph shapes
-  float t = u_time * 0.25; // slow down a bit
-  vec2 c = vec2(0.285 + 0.25*cos(t*1.7), 0.01 + 0.25*sin(t*1.2));
+${noiseGLSL}
 
-  int maxIter = u_maxIter;
-  float i = 0.0;
-  float trap = 1e9;
-  for (int ii = 0; ii < 500; ii++) {
-    i = float(ii);
-    if (ii >= maxIter) break;
-    vec2 z2 = vec2(z.x*z.x - z.y*z.y, 2.0*z.x*z.y) + c;
-    z = z2;
-    float r2 = dot(z, z);
-    trap = min(trap, abs(z.x) + abs(z.y));
-    if (r2 > 256.0) break;
-  }
-
-  float colorT;
-  if (int(i) >= maxIter) {
-    colorT = 0.0;
-  } else {
-    float r = length(z);
-    float nu = i - log2(log2(max(r, 1.001))) + 4.0;
-    colorT = nu / float(maxIter);
-  }
-  colorT = clamp(colorT + 0.15 * exp(-3.0*trap), 0.0, 1.0);
-  return getPalette(colorT, u_palette);
-}
-
-// Sierpinski Triangle test using base-2 fractional folding
-// Returns t in [0,1], where lower values indicate earlier removal (more hollow)
-float sierpinskiTri(vec2 pNorm) {
-  vec2 q = pNorm;
-  float tLevel = 1.0;
-  for (int ii = 0; ii < 1024; ii++) {
-    if (ii >= u_maxIter) break;
-    vec2 r = fract(q * 2.0);
-    // In a unit triangle tiling, points with r.x + r.y > 1 are in the 'removed' central region
-    if (r.x + r.y > 1.0) {
-      tLevel = float(ii) / max(1.0, float(u_maxIter));
-      return tLevel; // early removal
-    }
-    q = r;
-  }
-  return 1.0; // never removed => deepest level
-}
-
-// Sierpinski Carpet using base-3 digit test
-float sierpinskiCarpet(vec2 pNorm) {
-  vec2 q = pNorm;
-  float tLevel = 1.0;
-  for (int ii = 0; ii < 1024; ii++) {
-    if (ii >= u_maxIter) break;
-    vec2 r = fract(q * 3.0);
-    if (r.x > 1.0/3.0 && r.x < 2.0/3.0 && r.y > 1.0/3.0 && r.y < 2.0/3.0) {
-      tLevel = float(ii) / max(1.0, float(u_maxIter));
-      return tLevel;
-    }
-    q = r;
-  }
-  return 1.0;
-}
-
-float isMiddleThird(float a) {
-  return step(1.0/3.0, a) * step(a, 2.0/3.0);
-}
-
-// Menger Sponge membership depth using base-3 rule: removed if at any level, at least two axes in middle third
-float mengerDepth(vec3 p) {
-  vec3 q = p;
-  for (int ii = 0; ii < 128; ii++) {
-    if (ii >= u_maxIter) break;
-    vec3 r = fract(q * 3.0);
-    float midCount = isMiddleThird(r.x) + isMiddleThird(r.y) + isMiddleThird(r.z);
-    if (midCount >= 2.0) {
-      return float(ii) / max(1.0, float(u_maxIter));
-    }
-    q = r;
-  }
-  return 1.0;
-}
-
-// Sierpinski Pyramid (tetrahedral gasket) approximate rule: removed when x+y+y >1 in tri, generalized to 3D as sum > 1
-float sierpinskiPyramidDepth(vec3 p) {
-  vec3 q = p;
-  for (int ii = 0; ii < 128; ii++) {
-    if (ii >= u_maxIter) break;
-    vec3 r = fract(q * 2.0);
-    if (r.x + r.y + r.z > 1.0) {
-      return float(ii) / max(1.0, float(u_maxIter));
-    }
-    q = r;
-  }
-  return 1.0;
-}
-
-vec2 hash(vec2 p) {
-  p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
-  return -1.0 + 2.0 * fract(sin(p) * 43758.5453123);
-}
-
-float noise(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  vec2 u = f * f * (3.0 - 2.0 * f);
-  float n = mix(mix(dot(hash(i + vec2(0.0, 0.0)), f - vec2(0.0, 0.0)),
-                    dot(hash(i + vec2(1.0, 0.0)), f - vec2(1.0, 0.0)), u.x),
-                mix(dot(hash(i + vec2(0.0, 1.0)), f - vec2(0.0, 1.0)),
-                    dot(hash(i + vec2(1.0, 1.0)), f - vec2(1.0, 1.0)), u.x), u.y);
-  return n * 0.5 + 0.5;
-}
-
-float fbm(vec2 p, int octaves) {
-  float v = 0.0;
-  float a = 0.5;
-  vec2 shift = vec2(100.0);
-  for (int i = 0; i < 6; i++) {
-    if (i >= octaves) break;
-    v += a * noise(p);
-    p = p * 2.0 + shift;
-    a *= 0.5;
-  }
-  return v;
-}
-
-vec3 colorLiquid(vec2 p) {
-  float t = u_time * 0.15;
-  int baseOct = 1 + u_maxIter / 25;
-  if (baseOct > 3) baseOct = 3;
-  // Domain warping
-  vec2 q = vec2(fbm(p, baseOct), fbm(p + vec2(5.2, 1.3), baseOct));
-  vec2 r = vec2(fbm(p + 4.0*q + vec2(1.7, 9.2) + t, baseOct), fbm(p + 4.0*q + vec2(8.3, 2.8) + t*1.1, baseOct));
-  float f = fbm(p + 4.0*r, baseOct + 2);
-  return getPalette(clamp(f*f*3.5, 0.0, 1.0), u_palette);
-}
-
-// Plasma effect
-vec3 colorPlasma(vec2 p) {
-    float t = u_time * 0.5;
-    float v = 0.0;
-    v += sin(p.x * 8.0 + t);
-    v += sin((p.y * 5.0 - t) * 2.0);
-    v += sin((p.x + p.y + t) * 4.0);
-    vec2 p2 = p * 2.0;
-    v += sin(sqrt(p2.x*p2.x + p2.y*p2.y + 1.0) + t);
-    v = v / 4.0;
-    return getPalette(v, u_palette);
-}
-
-// Dynamic Morph
-vec3 colorDynamicMorph(vec3 p) {
-  vec3 q = p;
-  float t = u_time * 0.1;
-  for (int i = 0; i < 10; i++) {
-    if (i >= u_maxIter) break;
-    q = abs(q) / dot(q, q) - vec3(0.5 + 0.3*sin(t), 0.5 + 0.3*cos(t), 0.5 + 0.3*sin(t*1.2));
-  }
-  float colorT = fract(length(q) * 0.2);
-  colorT = 1.0 - abs(colorT * 2.0 - 1.0);
-  return getPalette(colorT, u_palette);
-}
-
-// 3D Web (Iterative network with gradient)
-vec3 colorWeb3D(vec3 p) {
-  vec3 q = p;
-  float t = u_time * 0.15;
-  float minD = 1000.0;
-  for (int i = 0; i < 16; i++) {
-    if (i >= u_maxIter) break;
-    q = abs(q) - vec3(0.4, 0.4, 0.4);
-    float s = sin(t + float(i)*0.1);
-    float c = cos(t + float(i)*0.1);
-    q.xy = mat2(c, -s, s, c) * q.xy;
-    q.xz = mat2(c, -s, s, c) * q.xz;
-    q = q * 1.5 - vec3(0.2 * sin(t * 0.5));
-    // Orbit trap for web-like filaments
-    float dist = min(abs(q.x), min(abs(q.y), abs(q.z)));
-    minD = min(minD, dist);
-  }
-  float colorT = fract(log(1.0 + minD * 100.0) * 0.4 + t);
-  return getPalette(colorT, u_palette);
-}
-
-// Star Journey (3D Raymarching)
-vec3 colorStarJourney(vec2 uv) {
-  // Camera flies forward: 0.5 (was 1.5) for 3x slower movement
-  vec3 ro = vec3(0.0, 0.0, u_time * 0.5);
-  vec3 rd = normalize(vec3(uv, 1.0));
-
-  // Rotate camera
-  float a = u_time * 0.1;
-  rd.xy *= rot(a);
-  rd.xz *= rot(a * 0.7);
-
-  float t = 0.0;
-  float minOrbit = 1e10;
-  int steps = 0;
-
-  // Pre-calculate animation offset
-  vec3 shift = vec3(0.5 * sin(u_time * 0.2), 0.3 * cos(u_time * 0.3), 0.0);
-
-  for (int i = 0; i < 40; i++) {
-    steps = i;
-    vec3 p = ro + rd * t;
-    // Repeat space
-    vec3 q = mod(p + 4.0, 8.0) - 4.0;
-
-    // Fractal DE: Simple recursive folding
-    float s = 1.0;
-    for (int j = 0; j < 5; j++) {
-      if (j >= u_maxIter / 2) break;
-      q = abs(q) - 1.2;
-      float r2 = dot(q, q);
-      minOrbit = min(minOrbit, r2);
-      float k = 2.0 / clamp(r2, 0.1, 1.5);
-      q *= k;
-      s *= k;
-      q += shift;
-    }
-    float d = (length(q) - 0.2) / s;
-    if (d < 0.001 || t > 40.0) break;
-    t += d * 0.7;
-  }
-
-  // Use minOrbit for smooth coloring. Log scale to compress the range and mirror palette.
-  float colorT = fract(log(1.0 + minOrbit) * 0.5 + u_time * 0.04);
-  colorT = 1.0 - abs(colorT * 2.0 - 1.0);
-  vec3 col = getPalette(colorT, u_palette);
-
-  // Simple lighting / fog
-  col *= 1.0 / (1.0 + t * t * 0.015);
-  // Soft glow based on steps
-  col += (float(steps) / 40.0) * 0.15 * col;
-
-  return col;
-}
-
-// 3D Bending Star with Raymarching
-vec3 colorStar3D(vec2 uv) {
-  float camTime = u_time * 0.3;
-  // Camera orbits around the center
-  vec3 ro = vec3(5.0 * cos(camTime), 2.0 * sin(camTime * 0.4), 5.0 * sin(camTime));
-  vec3 target = vec3(0.0, 0.0, 0.0);
-  vec3 cw = normalize(target - ro);
-  vec3 cp = vec3(0.0, 1.0, 0.0);
-  vec3 cu = normalize(cross(cw, cp));
-  vec3 cv = normalize(cross(cu, cw));
-  vec3 rd = normalize(uv.x * cu + uv.y * cv + 2.0 * cw);
-
-  float t = 0.0;
-  float totalGlow = 0.0;
-  float minD = 1e10;
-
-  for (int i = 0; i < 100; i++) {
-    if (i >= u_maxIter) break;
-    vec3 p = ro + rd * t;
-
-    // Bending effect: rotate space based on distance from center
-    float r = length(p);
-    float bend = r * 0.2 - u_time * 0.6;
-    float s = sin(bend), c = cos(bend);
-    p.xz *= mat2(c, -s, s, c);
-    p.xy *= mat2(c, -s, s, c);
-
-    // Star SDF: Core + multiple rays
-    float core = length(p) - 0.25;
-
-    float rays = 1e10;
-    vec3 qR = p;
-    float thick = 0.008 * (1.0 + 2.0 / (r + 0.1));
-    for (int j = 0; j < 6; j++) {
-      rays = min(rays, min(length(qR.yz), min(length(qR.xz), length(qR.xy))));
-      qR.xy *= rot(0.8);
-      qR.yz *= rot(0.5);
-    }
-    rays -= thick;
-
-    float d = min(core, rays);
-    minD = min(minD, d);
-
-    // Accumulate glow, stronger near the center
-    totalGlow += exp(-d * 10.0) * (1.0 / (1.0 + r * 0.5));
-
-    if (d < 0.001 || t > 20.0) break;
-    t += d * 0.5;
-  }
-
-  // Base color from palette
-  float colorT = fract(u_time * 0.05 + minD);
-  vec3 col = getPalette(colorT, u_palette);
-
-  // Apply intense glow for "bright inside"
-  col += vec3(1.0, 0.9, 0.6) * totalGlow * 0.2;
-
-  // Exponential fog
-  col *= exp(-0.15 * t);
-
-  return col;
-}
+${fractalFunctions}
 
 void main() {
   // Map pixel to complex plane, keeping aspect ratio
@@ -549,53 +296,10 @@ void main() {
   vec2 z = (rot(u_rotation) * uv) * (u_span * 0.5) + u_center;
 
   vec3 col;
-  if (u_fractalType == 0) {
-    col = colorJulia(z);
-  } else if (u_fractalType == 1) {
-    // Map to unit square roughly centered around current center/span
-    vec2 pNorm = z / max(1e-6, u_span) + vec2(0.5);
-    float tTri = sierpinskiTri(pNorm);
-    float shade = 1.0 - tTri; // earlier removal = brighter
-    col = getPalette(shade, u_palette);
-  } else if (u_fractalType == 2) {
-    vec2 pNorm = z / max(1e-6, u_span) + vec2(0.5);
-    float tCar = sierpinskiCarpet(pNorm);
-    float shade = 1.0 - tCar;
-    col = getPalette(shade, u_palette);
-  } else if (u_fractalType == 3) {
-    // 3D: Menger Sponge slice; z varies over time to reveal layers
-    vec2 pNorm2 = z / max(1e-6, u_span) + vec2(0.5);
-    float zSlice = 0.5 + 0.45 * sin(u_time * 0.25);
-    vec3 p3 = vec3(pNorm2, zSlice);
-    float t = mengerDepth(p3);
-    float shade = 1.0 - t;
-    col = getPalette(shade, u_palette);
-  } else if (u_fractalType == 4) {
-    // 3D: Sierpinski Pyramid slice
-    vec2 pNorm2 = z / max(1e-6, u_span) + vec2(0.5);
-    float zSlice = 0.5 + 0.45 * sin(u_time * 0.22 + 1.0);
-    vec3 p3 = vec3(pNorm2, zSlice);
-    float t = sierpinskiPyramidDepth(p3);
-    float shade = 1.0 - t;
-    col = getPalette(shade, u_palette);
-  } else if (u_fractalType == 10) {
-    col = colorPlasma(z);
-  } else if (u_fractalType == 11) {
-    vec2 pNorm2 = z / max(1e-6, u_span) + vec2(0.5);
-    float zSlice = 0.5 + 0.45 * sin(u_time * 0.22 + 1.0);
-    vec3 p3 = vec3(pNorm2, zSlice);
-    col = colorDynamicMorph(p3);
-  } else if (u_fractalType == 12) {
-    col = colorStarJourney(uv);
-  } else if (u_fractalType == 13) {
-    col = colorLiquid(z);
-  } else if (u_fractalType == 14) {
-    vec2 pNorm2 = z / max(1e-6, u_span) + vec2(0.5);
-    float zSlice = 0.5 + 0.4 * sin(u_time * 0.2);
-    vec3 p3 = vec3(pNorm2, zSlice);
-    col = colorWeb3D(p3);
-  } else if (u_fractalType == 15) {
-    col = colorStar3D(uv);
+  if (u_fractalType == -1) {
+    // Placeholder
+    col = vec3(0.0);
+  ${fractalCases}
   } else {
     // Overlay-only types: neutral background
     col = vec3(0.0);
@@ -612,6 +316,9 @@ void main() {
 
   gl_FragColor = vec4(col, 1.0);
 }`;
+  };
+
+  const FRAG_SRC = generateFragSrc();
 
   function compileShader(type, src) {
     const sh = gl.createShader(type);
@@ -772,259 +479,17 @@ void main() {
     overlayCtx.lineTo(s.x, s.y);
   }
 
-  // Stochastic Barnsley fern (IFS) — overlay dots
-  function drawFern(iter) {
-    if (!overlayCtx) return;
-    // Points per frame scales with iterations slider
-    const pts = Math.max(2000, Math.min(40000, (iter|0) * 200));
-    // Canonical fern bounding box
-    const xmin = -2.1820, xmax = 2.6558; const w = xmax - xmin;
-    const ymin = 0.0, ymax = 9.9983; const h = ymax - ymin;
-    const s = 0.9; // occupy 90% of unit height
-    const xscale = s * (w / h);
-    const yscale = s;
-    const offx = 0.5 - xscale * 0.5;
-    const offy = 0.05; // bottom margin
-
-    // Visuals
-    const size = Math.max(1, Math.floor(1 * dpr));
-    overlayCtx.save();
-    overlayCtx.fillStyle = 'rgba(234,234,234,0.9)';
-
-    // Initialize state once
-    if (!fernState.ready) {
-      fernState.x = 0; fernState.y = 0; fernState.ready = true;
-    }
-    let x = fernState.x, y = fernState.y;
-    for (let i = 0; i < pts; i++) {
-      const r = Math.random();
-      let nx, ny;
-      if (r < 0.01) {
-        // Stem
-        nx = 0;
-        ny = 0.16 * y;
-      } else if (r < 0.86) {
-        // Successively smaller leaflets
-        nx = 0.85 * x + 0.04 * y;
-        ny = -0.04 * x + 0.85 * y + 1.6;
-      } else if (r < 0.93) {
-        // Largest left-hand leaflet
-        nx = 0.20 * x - 0.26 * y;
-        ny = 0.23 * x + 0.22 * y + 1.6;
-      } else {
-        // Largest right-hand leaflet
-        nx = -0.15 * x + 0.28 * y;
-        ny = 0.26 * x + 0.24 * y + 0.44;
-      }
-      x = nx; y = ny;
-
-      // Map to normalized [0,1]
-      const nnx = offx + ((x - xmin) / w) * xscale;
-      const nny = offy + ((y - ymin) / h) * yscale;
-      const wpt = worldFromNorm(nnx, nny);
-      const spt = planeToScreen(wpt.x, wpt.y);
-      overlayCtx.fillRect(spt.x, spt.y, size, size);
-    }
-    fernState.x = x; fernState.y = y;
-    overlayCtx.restore();
-  }
-
-  function drawKoch(iter) {
-    if (!overlayCtx) return;
-    iter = Math.max(0, Math.min(6, iter|0));
-    // Generate via L-system
-    let str = 'F';
-    for (let i = 0; i < iter; i++) {
-      let next = '';
-      for (const ch of str) {
-        if (ch === 'F') next += 'F+F--F+F'; else next += ch;
-      }
-      str = next;
-    }
-    const angle = Math.PI / 3; // 60°
-    let x = 0.1, y = 0.5, dir = 0;
-    const len = 0.8 / Math.pow(3, iter);
-    overlayCtx.save();
-    overlayCtx.lineWidth = Math.max(1, Math.floor(2 * dpr));
-    overlayCtx.strokeStyle = '#eaeaea';
-    overlayCtx.beginPath();
-    pathMoveToNorm(x, y);
-    for (const ch of str) {
-      if (ch === 'F') {
-        x += Math.cos(dir) * len;
-        y += Math.sin(dir) * len;
-        pathLineToNorm(x, y);
-      } else if (ch === '+') dir += angle; else if (ch === '-') dir -= angle;
-    }
-    overlayCtx.stroke();
-    overlayCtx.restore();
-  }
-
-  function buildHilbertString(n) {
-    let s = 'A';
-    for (let i = 0; i < n; i++) {
-      let next = '';
-      for (const ch of s) {
-        if (ch === 'A') next += '+BF-AFA-FB+';
-        else if (ch === 'B') next += '-AF+BFB+FA-';
-        else next += ch;
-      }
-      s = next;
-    }
-    return s;
-  }
-
-  // Classic Peano (3x3) curve via L-system
-  function buildPeanoString(n) {
-    let s = 'L';
-    for (let i = 0; i < n; i++) {
-      let next = '';
-      for (const ch of s) {
-        if (ch === 'L') next += 'LFRFL-F-RFLFR+F+LFRFL';
-        else if (ch === 'R') next += 'RFLFR+F+LFRFL-F-RFLFR';
-        else next += ch;
-      }
-      s = next;
-    }
-    return s;
-  }
-
-  function drawPeano(iter) {
-    if (!overlayCtx) return;
-    iter = Math.max(1, Math.min(5, iter|0));
-    const s = buildPeanoString(iter - 1);
-    const angle = Math.PI / 2;
-    const len = 0.8 / Math.pow(3, iter - 1);
-    let x = 0.1, y = 0.1, dir = 0; // start at bottom-left
-    overlayCtx.save();
-    overlayCtx.lineWidth = Math.max(1, Math.floor(2 * dpr));
-    overlayCtx.strokeStyle = '#eaeaea';
-    overlayCtx.beginPath();
-    pathMoveToNorm(x, y);
-    for (const ch of s) {
-      if (ch === 'F') {
-        x += Math.cos(dir) * len;
-        y += Math.sin(dir) * len;
-        pathLineToNorm(x, y);
-      } else if (ch === '+') dir += angle; else if (ch === '-') dir -= angle;
-    }
-    overlayCtx.stroke();
-    overlayCtx.restore();
-  }
-
-  function drawTree(iter) {
-    if (!overlayCtx) return;
-    iter = Math.max(1, Math.min(12, iter|0));
-    const stack = [];
-    const axiom = 'X';
-    const rules = {
-      'X': 'F-[[X]+X]+F[+FX]-X',
-      'F': 'FF'
-    };
-    // Build string up to smaller iterations to avoid explosion
-    let s = axiom;
-    const maxI = Math.min(5, iter);
-    for (let i = 0; i < maxI; i++) {
-      let next = '';
-      for (const ch of s) {
-        next += (rules[ch] || ch);
-      }
-      s = next;
-    }
-    // Turtle
-    let x = 0.5, y = 0.95, dir = -Math.PI/2; // start at bottom center upwards
-    const step = 0.02 * Math.max(1, iter - 2);
-    overlayCtx.save();
-    overlayCtx.lineWidth = Math.max(1, Math.floor(1.5 * dpr));
-    overlayCtx.strokeStyle = '#eaeaea';
-    overlayCtx.beginPath();
-    pathMoveToNorm(x, y);
-    for (const ch of s) {
-      if (ch === 'F') {
-        const nx = x + Math.cos(dir) * step;
-        const ny = y + Math.sin(dir) * step;
-        pathLineToNorm(nx, ny);
-        x = nx; y = ny;
-      } else if (ch === '+') dir += Math.PI/7; // ~25.7°
-      else if (ch === '-') dir -= Math.PI/7;
-      else if (ch === '[') stack.push({ x, y, dir });
-      else if (ch === ']') {
-        const st = stack.pop();
-        if (!st) continue;
-        x = st.x; y = st.y; dir = st.dir;
-        overlayCtx.moveTo(planeToScreen(worldFromNorm(x,y).x, worldFromNorm(x,y).y).x, planeToScreen(worldFromNorm(x,y).x, worldFromNorm(x,y).y).y);
-      }
-    }
-    overlayCtx.stroke();
-    overlayCtx.restore();
-  }
-
-  function drawPythagoras(iter) {
-    if (!overlayCtx) return;
-    const depth = Math.max(1, Math.min(10, iter|0));
-    overlayCtx.save();
-    overlayCtx.lineWidth = Math.max(1, Math.floor(1.2 * dpr));
-    overlayCtx.strokeStyle = '#eaeaea';
-    overlayCtx.fillStyle = 'rgba(255,255,255,0.08)';
-
-    function drawSquare(center, side, angle) {
-      const ex = { x: Math.cos(angle) * (side/2), y: Math.sin(angle) * (side/2) };
-      const ey = { x: -Math.sin(angle) * (side/2), y: Math.cos(angle) * (side/2) };
-      const p1 = { x: center.x - ex.x - ey.x, y: center.y - ex.y - ey.y }; // bottom-left
-      const p2 = { x: center.x + ex.x - ey.x, y: center.y + ex.y - ey.y }; // bottom-right
-      const p3 = { x: center.x + ex.x + ey.x, y: center.y + ex.y + ey.y }; // top-right
-      const p4 = { x: center.x - ex.x + ey.x, y: center.y - ex.y + ey.y }; // top-left
-      const s1 = planeToScreen(worldFromNorm(p1.x, p1.y).x, worldFromNorm(p1.x, p1.y).y);
-      const s2 = planeToScreen(worldFromNorm(p2.x, p2.y).x, worldFromNorm(p2.x, p2.y).y);
-      const s3 = planeToScreen(worldFromNorm(p3.x, p3.y).x, worldFromNorm(p3.x, p3.y).y);
-      const s4 = planeToScreen(worldFromNorm(p4.x, p4.y).x, worldFromNorm(p4.x, p4.y).y);
-      overlayCtx.beginPath();
-      overlayCtx.moveTo(s1.x, s1.y);
-      overlayCtx.lineTo(s2.x, s2.y);
-      overlayCtx.lineTo(s3.x, s3.y);
-      overlayCtx.lineTo(s4.x, s4.y);
-      overlayCtx.closePath();
-      overlayCtx.fill();
-      overlayCtx.stroke();
-      return { p1, p2, p3, p4 };
-    }
-
-    function rec(center, side, angle, d) {
-      const corners = drawSquare(center, side, angle);
-      if (d <= 0) return;
-      const childSide = side / Math.SQRT2;
-      const angleL = angle - Math.PI/4;
-      const angleR = angle + Math.PI/4;
-      const exL = { x: Math.cos(angleL) * (childSide/2), y: Math.sin(angleL) * (childSide/2) };
-      const eyL = { x: -Math.sin(angleL) * (childSide/2), y: Math.cos(angleL) * (childSide/2) };
-      const exR = { x: Math.cos(angleR) * (childSide/2), y: Math.sin(angleR) * (childSide/2) };
-      const eyR = { x: -Math.sin(angleR) * (childSide/2), y: Math.cos(angleR) * (childSide/2) };
-      // centers from top-left and top-right corners respectively
-      const cL = { x: corners.p4.x + exL.x - eyL.x, y: corners.p4.y + exL.y - eyL.y };
-      const cR = { x: corners.p3.x - exR.x - eyR.x, y: corners.p3.y - exR.y - eyR.y };
-      rec(cL, childSide, angleL, d - 1);
-      rec(cR, childSide, angleR, d - 1);
-    }
-
-    const baseSide = 0.18; // normalized units in [0,1]
-    const baseCenter = { x: 0.5, y: 0.1 + baseSide/2 };
-    rec(baseCenter, baseSide, 0, depth - 1);
-    overlayCtx.restore();
-  }
-
   function drawOverlay() {
     if (!overlayCtx || !overlay) return;
     clearOverlay();
-    if (state.fractalType === 5) {
-      drawKoch(state.maxIter);
-    } else if (state.fractalType === 6) {
-      drawPeano(state.maxIter);
-    } else if (state.fractalType === 7) {
-      drawPythagoras(state.maxIter);
-    } else if (state.fractalType === 8) {
-      drawTree(state.maxIter);
-    } else if (state.fractalType === 9) {
-      drawFern(state.maxIter);
+    const fractal = getFractalById(state.fractalType);
+    if (fractal && fractal.type === 'overlay' && fractal.draw) {
+      fractal.draw(overlayCtx, state.maxIter, dpr, {
+        pathMoveToNorm,
+        pathLineToNorm,
+        worldFromNorm,
+        planeToScreen
+      }, fernState);
     }
   }
 
@@ -1034,7 +499,8 @@ void main() {
     gl.clear(gl.COLOR_BUFFER_BIT);
     setUniforms();
     gl.drawArrays(gl.TRIANGLES, 0, 6);
-    if (state.fractalType >= 5) {
+    const fractal = getFractalById(state.fractalType);
+    if (fractal && fractal.type === 'overlay') {
       drawOverlay();
     } else if (overlayCtx) {
       clearOverlay();
@@ -1065,103 +531,9 @@ void main() {
   // UI wiring
   function bindUI() {
     function applyFractalDefaults(type) {
-      if (type === 0) {
-        // Julia
-        state.maxIter = 200;
-        state.scale = 1.0;
-        state.rotationDeg = 0;
-        state.center = { x: -0.2, y: 0.0 };
-      } else if (type === 1) {
-        // Sierpinski Triangle
-        state.maxIter = 9;
-        state.scale = 1.2;
-        state.rotationDeg = 0;
-        state.center = { x: 0.0, y: 0.0 };
-      } else if (type === 2) {
-        // Sierpinski Carpet
-        state.maxIter = 6;
-        state.scale = 1.0;
-        state.rotationDeg = 0;
-        state.center = { x: 0.0, y: 0.0 };
-      } else if (type === 3) {
-        // Menger Sponge slice
-        state.maxIter = 5;
-        state.scale = 1.0;
-        state.rotationDeg = 0;
-        state.center = { x: 0.0, y: 0.0 };
-      } else if (type === 4) {
-        // Sierpinski Pyramid slice
-        state.maxIter = 9;
-        state.scale = 1.0;
-        state.rotationDeg = 0;
-        state.center = { x: 0.0, y: 0.0 };
-      } else if (type === 5) {
-        // Koch curve
-        state.maxIter = 4;
-        state.scale = 1.0;
-        state.rotationDeg = 0;
-        state.center = { x: 0.0, y: 0.0 };
-      } else if (type === 6) {
-        // Peano/Hilbert curve
-        state.maxIter = 5;
-        state.scale = 1.0;
-        state.rotationDeg = 0;
-        state.center = { x: 0.0, y: 0.0 };
-      } else if (type === 7) {
-        // Pythagoras tree
-        state.maxIter = 9;
-        state.scale = 1.0;
-        state.rotationDeg = 0;
-        state.center = { x: 0.0, y: 0.0 };
-      } else if (type === 8) {
-        // L-system plant
-        state.maxIter = 6;
-        state.scale = 1.0;
-        state.rotationDeg = 0;
-        state.center = { x: 0.0, y: 0.0 };
-      } else if (type === 9) {
-        // Stochastic Fern (IFS)
-        state.maxIter = 200; // controls points per frame
-        state.scale = 1.0;
-        state.rotationDeg = 0;
-        state.center = { x: 0.0, y: 0.0 };
-        fernState.ready = false;
-      } else if (type === 10) {
-        // Colorful Plasma
-        state.maxIter = 50; // Not used by plasma, but can be repurposed
-        state.scale = 1.0;
-        state.rotationDeg = 0;
-        state.center = { x: 0.0, y: 0.0 };
-      } else if (type === 11) {
-        // Dynamic Morph
-        state.maxIter = 8;
-        state.scale = 1.0;
-        state.rotationDeg = 0;
-        state.center = { x: 0.0, y: 0.0 };
-      } else if (type === 12) {
-        // Star Journey
-        state.maxIter = 8; // Controls folding depth
-        state.scale = 1.0;
-        state.rotationDeg = 0;
-        state.center = { x: 0.0, y: 0.0 };
-      } else if (type === 13) {
-        // Liquid Gradient
-        state.maxIter = 30;
-        state.scale = 1.0;
-        state.rotationDeg = 0;
-        state.center = { x: 0.0, y: 0.0 };
-      } else if (type === 14) {
-        // 3D Web (gradient)
-        state.maxIter = 10;
-        state.scale = 1.0;
-        state.rotationDeg = 0;
-        state.center = { x: 0.0, y: 0.0 };
-      } else if (type === 15) {
-        // 3D Bending Star
-        state.maxIter = 64; // Raymarching steps
-        state.scale = 1.0;
-        state.rotationDeg = 0;
-        state.center = { x: 0.0, y: 0.0 };
+      const fractal = getFractalById(type);
+      if (fractal && fractal.defaults) {
+        Object.assign(state, fractal.defaults);
       }
       // Reflect in UI controls
       ui.iterations.value = String(state.maxIter);
