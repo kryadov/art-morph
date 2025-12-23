@@ -1,7 +1,7 @@
 /*
   Art Morph — GPU fractal & ornaments prototype
   - WebGL1 fragment shader renders animated Julia fractal
-  - Palettes inspired by Khokhloma (reds/gold) and Gzhel (blue/white) + rainbow
+  - Palettes: Khokhloma, Gzhel, Rainbow, Sunset, Forest, Ocean, Neon, Monochrome
   - Interactive: zoom, pan, rotation, iterations, speed, palette; mouse & touch
   - Responsive HiDPI canvas with context loss handling
 */
@@ -55,7 +55,7 @@
   let buffer = null;
   let attribs = {};
   let uniforms = {};
-  let dpr = Math.min(window.devicePixelRatio || 1, 2);
+  let dpr = Math.min(window.devicePixelRatio || 1, 1.5);
   let lastT = performance.now();
   let timeSec = 0; // accumulated time in seconds (paused respects state.playing)
   let needsRender = true;
@@ -124,8 +124,8 @@ uniform float u_span;       // base span scaled by zoom (width of plane)
 uniform float u_rotation;   // radians
 uniform float u_time;       // seconds
 uniform int u_maxIter;
-uniform int u_palette;      // 0=Khokhloma,1=Gzhel,2=Rainbow
-uniform int u_fractalType;  // 0=Julia,1=Tri,2=Carpet
+uniform int u_palette;      // 0=Khokhloma,1=Gzhel,2=Rainbow,3=Sunset,4=Forest,5=Ocean,6=Neon,7=Monochrome
+uniform int u_fractalType;  // 0=Julia,1=Tri,2=Carpet,13=Liquid
 
 // Utility: rotate 2D vector
 mat2 rot(float a) {
@@ -172,10 +172,68 @@ vec3 paletteRainbow(float t) {
   return hsv2rgb(vec3(fract(t + 0.0), 0.85, 1.0));
 }
 
+// Sunset palette: deep blues to oranges and yellows
+vec3 paletteSunset(float t) {
+  t = clamp(t, 0., 1.);
+  vec3 c0 = vec3(0.05, 0.02, 0.15);  // dark midnight blue
+  vec3 c1 = vec3(0.4, 0.05, 0.4);    // purple
+  vec3 c2 = vec3(0.9, 0.3, 0.1);     // orange-red
+  vec3 c3 = vec3(1.0, 0.8, 0.2);     // yellow-gold
+  if (t < 0.3) return mix(c0, c1, smoothstep(0., 0.3, t));
+  if (t < 0.7) return mix(c1, c2, smoothstep(0.3, 0.7, t));
+  return mix(c2, c3, smoothstep(0.7, 1.0, t));
+}
+
+// Forest palette: dark greens to light lime
+vec3 paletteForest(float t) {
+  t = clamp(t, 0., 1.);
+  vec3 c0 = vec3(0.01, 0.05, 0.01);  // very dark green
+  vec3 c1 = vec3(0.1, 0.35, 0.15);   // forest green
+  vec3 c2 = vec3(0.4, 0.6, 0.2);     // olive/lime
+  vec3 c3 = vec3(0.8, 0.9, 0.5);     // pale spring green
+  if (t < 0.4) return mix(c0, c1, smoothstep(0., 0.4, t));
+  if (t < 0.7) return mix(c1, c2, smoothstep(0.4, 0.7, t));
+  return mix(c2, c3, smoothstep(0.7, 1.0, t));
+}
+
+// Ocean palette: deep sea to bright cyan/white
+vec3 paletteOcean(float t) {
+  t = clamp(t, 0., 1.);
+  vec3 c0 = vec3(0.02, 0.05, 0.2);   // deep blue
+  vec3 c1 = vec3(0.0, 0.4, 0.55);    // teal
+  vec3 c2 = vec3(0.2, 0.8, 0.85);    // cyan
+  vec3 c3 = vec3(0.9, 1.0, 1.0);     // water white
+  if (t < 0.35) return mix(c0, c1, smoothstep(0., 0.35, t));
+  if (t < 0.75) return mix(c1, c2, smoothstep(0.35, 0.75, t));
+  return mix(c2, c3, smoothstep(0.75, 1.0, t));
+}
+
+// Neon palette: dark to vibrant magenta and cyan
+vec3 paletteNeon(float t) {
+  t = clamp(t, 0., 1.);
+  vec3 c0 = vec3(0.05, 0.0, 0.1);    // dark purple
+  vec3 c1 = vec3(0.9, 0.0, 0.9);     // magenta
+  vec3 c2 = vec3(0.0, 0.9, 0.9);     // cyan
+  vec3 c3 = vec3(1.0, 1.0, 1.0);     // white
+  if (t < 0.4) return mix(c0, c1, smoothstep(0., 0.4, t));
+  if (t < 0.8) return mix(c1, c2, smoothstep(0.4, 0.8, t));
+  return mix(c2, c3, smoothstep(0.8, 1.0, t));
+}
+
+// Monochrome palette: black to white
+vec3 paletteMonochrome(float t) {
+  return vec3(clamp(t, 0., 1.));
+}
+
 vec3 getPalette(float t, int which) {
   if (which == 0) return paletteKhokhloma(t);
   if (which == 1) return paletteGzhel(t);
-  return paletteRainbow(t);
+  if (which == 2) return paletteRainbow(t);
+  if (which == 3) return paletteSunset(t);
+  if (which == 4) return paletteForest(t);
+  if (which == 5) return paletteOcean(t);
+  if (which == 6) return paletteNeon(t);
+  return paletteMonochrome(t); // 7
 }
 
 // Compute color for Julia set at point z0
@@ -188,7 +246,7 @@ vec3 colorJulia(vec2 z0) {
   int maxIter = u_maxIter;
   float i = 0.0;
   float trap = 1e9;
-  for (int ii = 0; ii < 2000; ii++) {
+  for (int ii = 0; ii < 500; ii++) {
     i = float(ii);
     if (ii >= maxIter) break;
     vec2 z2 = vec2(z.x*z.x - z.y*z.y, 2.0*z.x*z.y) + c;
@@ -277,6 +335,46 @@ float sierpinskiPyramidDepth(vec3 p) {
   return 1.0;
 }
 
+vec2 hash(vec2 p) {
+  p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+  return -1.0 + 2.0 * fract(sin(p) * 43758.5453123);
+}
+
+float noise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  float n = mix(mix(dot(hash(i + vec2(0.0, 0.0)), f - vec2(0.0, 0.0)),
+                    dot(hash(i + vec2(1.0, 0.0)), f - vec2(1.0, 0.0)), u.x),
+                mix(dot(hash(i + vec2(0.0, 1.0)), f - vec2(0.0, 1.0)),
+                    dot(hash(i + vec2(1.0, 1.0)), f - vec2(1.0, 1.0)), u.x), u.y);
+  return n * 0.5 + 0.5;
+}
+
+float fbm(vec2 p, int octaves) {
+  float v = 0.0;
+  float a = 0.5;
+  vec2 shift = vec2(100.0);
+  for (int i = 0; i < 6; i++) {
+    if (i >= octaves) break;
+    v += a * noise(p);
+    p = p * 2.0 + shift;
+    a *= 0.5;
+  }
+  return v;
+}
+
+vec3 colorLiquid(vec2 p) {
+  float t = u_time * 0.15;
+  int baseOct = 1 + u_maxIter / 25;
+  if (baseOct > 3) baseOct = 3;
+  // Domain warping
+  vec2 q = vec2(fbm(p, baseOct), fbm(p + vec2(5.2, 1.3), baseOct));
+  vec2 r = vec2(fbm(p + 4.0*q + vec2(1.7, 9.2) + t, baseOct), fbm(p + 4.0*q + vec2(8.3, 2.8) + t*1.1, baseOct));
+  float f = fbm(p + 4.0*r, baseOct + 2);
+  return getPalette(clamp(f*f*3.5, 0.0, 1.0), u_palette);
+}
+
 // Plasma effect
 vec3 colorPlasma(vec2 p) {
     float t = u_time * 0.5;
@@ -321,7 +419,7 @@ vec3 colorStarJourney(vec2 uv) {
   // Pre-calculate animation offset
   vec3 shift = vec3(0.5 * sin(u_time * 0.2), 0.3 * cos(u_time * 0.3), 0.0);
 
-  for (int i = 0; i < 60; i++) {
+  for (int i = 0; i < 40; i++) {
     steps = i;
     vec3 p = ro + rd * t;
     // Repeat space
@@ -352,7 +450,7 @@ vec3 colorStarJourney(vec2 uv) {
   // Simple lighting / fog
   col *= 1.0 / (1.0 + t * t * 0.015);
   // Soft glow based on steps
-  col += (float(steps) / 60.0) * 0.15 * col;
+  col += (float(steps) / 40.0) * 0.15 * col;
 
   return col;
 }
@@ -405,6 +503,8 @@ void main() {
     col = colorDynamicMorph(p3);
   } else if (u_fractalType == 12) {
     col = colorStarJourney(uv);
+  } else if (u_fractalType == 13) {
+    col = colorLiquid(z);
   } else {
     // Overlay-only types: neutral background
     col = vec3(0.0);
@@ -950,6 +1050,12 @@ void main() {
       } else if (type === 12) {
         // Star Journey
         state.maxIter = 8; // Controls folding depth
+        state.scale = 1.0;
+        state.rotationDeg = 0;
+        state.center = { x: 0.0, y: 0.0 };
+      } else if (type === 13) {
+        // Liquid Gradient
+        state.maxIter = 30;
         state.scale = 1.0;
         state.rotationDeg = 0;
         state.center = { x: 0.0, y: 0.0 };

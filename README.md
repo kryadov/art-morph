@@ -1,6 +1,6 @@
 # Art Morph — GPU Fractal & Ornaments
 
-Interactive WebGL (WebGL1) demo that renders multiple fractal types (GPU and 2D overlay) with palettes inspired by Khokhloma and Gzhel, plus a rainbow mode. Includes mouse/touch interactions: zoom, pan, rotation, iterations, speed.
+Interactive WebGL (WebGL1) demo that renders multiple fractal types (GPU and 2D overlay) with various palettes (Khokhloma, Gzhel, Rainbow, Sunset, Forest, Ocean, Neon, Monochrome). Includes mouse/touch interactions: zoom, pan, rotation, iterations, speed.
 
 ![img.png](img.png)
 
