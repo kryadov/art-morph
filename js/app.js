@@ -476,6 +476,69 @@ vec3 colorStarJourney(vec2 uv) {
   return col;
 }
 
+// 3D Bending Star with Raymarching
+vec3 colorStar3D(vec2 uv) {
+  float camTime = u_time * 0.3;
+  // Camera orbits around the center
+  vec3 ro = vec3(5.0 * cos(camTime), 2.0 * sin(camTime * 0.4), 5.0 * sin(camTime));
+  vec3 target = vec3(0.0, 0.0, 0.0);
+  vec3 cw = normalize(target - ro);
+  vec3 cp = vec3(0.0, 1.0, 0.0);
+  vec3 cu = normalize(cross(cw, cp));
+  vec3 cv = normalize(cross(cu, cw));
+  vec3 rd = normalize(uv.x * cu + uv.y * cv + 2.0 * cw);
+
+  float t = 0.0;
+  float totalGlow = 0.0;
+  float minD = 1e10;
+
+  for (int i = 0; i < 100; i++) {
+    if (i >= u_maxIter) break;
+    vec3 p = ro + rd * t;
+
+    // Bending effect: rotate space based on distance from center
+    float r = length(p);
+    float bend = r * 0.2 - u_time * 0.6;
+    float s = sin(bend), c = cos(bend);
+    p.xz *= mat2(c, -s, s, c);
+    p.xy *= mat2(c, -s, s, c);
+
+    // Star SDF: Core + multiple rays
+    float core = length(p) - 0.25;
+
+    float rays = 1e10;
+    vec3 qR = p;
+    float thick = 0.008 * (1.0 + 2.0 / (r + 0.1));
+    for (int j = 0; j < 6; j++) {
+      rays = min(rays, min(length(qR.yz), min(length(qR.xz), length(qR.xy))));
+      qR.xy *= rot(0.8);
+      qR.yz *= rot(0.5);
+    }
+    rays -= thick;
+
+    float d = min(core, rays);
+    minD = min(minD, d);
+
+    // Accumulate glow, stronger near the center
+    totalGlow += exp(-d * 10.0) * (1.0 / (1.0 + r * 0.5));
+
+    if (d < 0.001 || t > 20.0) break;
+    t += d * 0.5;
+  }
+
+  // Base color from palette
+  float colorT = fract(u_time * 0.05 + minD);
+  vec3 col = getPalette(colorT, u_palette);
+
+  // Apply intense glow for "bright inside"
+  col += vec3(1.0, 0.9, 0.6) * totalGlow * 0.2;
+
+  // Exponential fog
+  col *= exp(-0.15 * t);
+
+  return col;
+}
+
 void main() {
   // Map pixel to complex plane, keeping aspect ratio
   vec2 uv = (gl_FragCoord.xy / u_resolution) * 2.0 - 1.0; // [-1,1]
@@ -531,6 +594,8 @@ void main() {
     float zSlice = 0.5 + 0.4 * sin(u_time * 0.2);
     vec3 p3 = vec3(pNorm2, zSlice);
     col = colorWeb3D(p3);
+  } else if (u_fractalType == 15) {
+    col = colorStar3D(uv);
   } else {
     // Overlay-only types: neutral background
     col = vec3(0.0);
@@ -615,7 +680,7 @@ void main() {
     const rect = canvas.getBoundingClientRect();
     // Reduce resolution for heavy 3D shaders to save GPU
     let dprLimit = 2;
-    if (state.fractalType === 12) dprLimit = 1.25;
+    if (state.fractalType === 12 || state.fractalType === 15) dprLimit = 1.25;
     const newDpr = Math.min(window.devicePixelRatio || 1, dprLimit);
     if (newDpr !== dpr) dpr = newDpr;
     const w = Math.max(1, Math.floor(rect.width * dpr));
@@ -1088,6 +1153,12 @@ void main() {
       } else if (type === 14) {
         // 3D Web (gradient)
         state.maxIter = 10;
+        state.scale = 1.0;
+        state.rotationDeg = 0;
+        state.center = { x: 0.0, y: 0.0 };
+      } else if (type === 15) {
+        // 3D Bending Star
+        state.maxIter = 64; // Raymarching steps
         state.scale = 1.0;
         state.rotationDeg = 0;
         state.center = { x: 0.0, y: 0.0 };
