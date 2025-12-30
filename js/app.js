@@ -157,7 +157,7 @@ void main() {
     ` : f.id === 12 || f.id === 15 ? `
     col = ${f.id === 12 ? 'colorStarJourney' : 'colorStar3D'}(uv);
     ` : `
-    col = ${f.id === 0 ? 'colorJulia' : f.id === 10 ? 'colorPlasma' : f.id === 13 ? 'colorLiquid' : 'colorEnergyCore'}(z);
+    col = ${f.id === 0 ? 'colorJulia' : f.id === 10 ? 'colorPlasma' : f.id === 13 ? 'colorLiquid' : f.id === 17 ? 'colorFlameTongues' : 'colorEnergyCore'}(z);
     `}
     `).join('');
 
@@ -387,7 +387,7 @@ void main() {
     const rect = canvas.getBoundingClientRect();
     // Reduce resolution for heavy 3D shaders to save GPU
     let dprLimit = 2;
-    if (state.fractalType === 12 || state.fractalType === 15) dprLimit = 1.25;
+    if (state.fractalType === 12 || state.fractalType === 15 || state.fractalType === 17) dprLimit = 1.25;
     const newDpr = Math.min(window.devicePixelRatio || 1, dprLimit);
     if (newDpr !== dpr) dpr = newDpr;
     const w = Math.max(1, Math.floor(rect.width * dpr));

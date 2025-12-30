@@ -146,7 +146,7 @@ Then in Settings → Pages, set Source to “GitHub Actions”.
 
 - Fractal: choose fractal type
   - Linear: Koch curve, Peano (3×3)
-  - Planar (shader): Sierpinski triangle, Sierpinski carpet
+  - Planar (shader): Sierpinski triangle, Sierpinski carpet, Flame Tongues
   - Volumetric (sliced in 2D): Menger sponge, Sierpinski pyramid
   - Tree‑like: Pythagoras tree, generic L‑system plant
 - Palette: switch color schemes
