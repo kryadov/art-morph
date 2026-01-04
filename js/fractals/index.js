@@ -8,6 +8,7 @@ import { starJourney, star3D } from './star.js';
 import { web3D } from './web.js';
 import { energyCore } from './energy.js';
 import { flameTongues } from './flame.js';
+import { clouds } from './clouds.js';
 import { kochCurve, peanoCurve, pythagorasTree, lSystemTree, fern } from './overlay.js';
 
 export const fractals = [
@@ -28,7 +29,8 @@ export const fractals = [
   web3D,
   star3D,
   energyCore,
-  flameTongues
+  flameTongues,
+  clouds
 ];
 
 export const getFractalById = (id) => fractals.find(f => f.id === id);

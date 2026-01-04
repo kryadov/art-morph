@@ -154,8 +154,8 @@ void main() {
     float zSlice = 0.5 + 0.4 * sin(u_time * 0.2);
     vec3 p3 = vec3(pNorm2, zSlice);
     col = colorWeb3D(p3);
-    ` : f.id === 12 || f.id === 15 ? `
-    col = ${f.id === 12 ? 'colorStarJourney' : 'colorStar3D'}(uv);
+    ` : f.id === 12 || f.id === 15 || f.id === 18 ? `
+    col = ${f.id === 12 ? 'colorStarJourney' : f.id === 15 ? 'colorStar3D' : 'colorClouds'}(uv);
     ` : `
     col = ${f.id === 0 ? 'colorJulia' : f.id === 10 ? 'colorPlasma' : f.id === 13 ? 'colorLiquid' : f.id === 17 ? 'colorFlameTongues' : 'colorEnergyCore'}(z);
     `}
@@ -171,7 +171,7 @@ uniform float u_rotation;   // radians
 uniform float u_time;       // seconds
 uniform int u_maxIter;
 uniform int u_palette;      // 0=Khokhloma,1=Gzhel,2=Rainbow,3=Sunset,4=Forest,5=Ocean,6=Neon,7=Monochrome
-uniform int u_fractalType;  // 0=Julia,1=Tri,2=Carpet,13=Liquid,14=Web3D
+uniform int u_fractalType;  // 0=Julia,1=Tri,2=Carpet,13=Liquid,14=Web3D,18=Clouds
 
 // Utility: rotate 2D vector
 mat2 rot(float a) {
@@ -387,7 +387,7 @@ void main() {
     const rect = canvas.getBoundingClientRect();
     // Reduce resolution for heavy 3D shaders to save GPU
     let dprLimit = 2;
-    if (state.fractalType === 12 || state.fractalType === 15 || state.fractalType === 17) dprLimit = 1.25;
+    if (state.fractalType === 12 || state.fractalType === 15 || state.fractalType === 17 || state.fractalType === 18) dprLimit = 1.25;
     const newDpr = Math.min(window.devicePixelRatio || 1, dprLimit);
     if (newDpr !== dpr) dpr = newDpr;
     const w = Math.max(1, Math.floor(rect.width * dpr));
