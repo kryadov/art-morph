@@ -14,7 +14,7 @@ vec3 colorClouds(vec2 uv) {
   float t = u_time * 1.0;
 
   // Day/Night cycle: 0.0 (night, black) to 1.0 (day, white)
-  float dayCycle = sin(u_time * 0.3) * 0.5 + 0.5;
+  float dayCycle = sin(u_time * 0.15) * 0.5 + 0.5;
   float dn = smoothstep(0.1, 0.9, dayCycle);
 
   vec2 p = uv;
@@ -30,18 +30,18 @@ vec3 colorClouds(vec2 uv) {
 
     // We use a zoom-like effect for "flight through"
     float z = fract(0.2 * (t + fi * 1.5));
-    float s = 0.5 + 5.0 * (1.0 - z);
+    float s = 0.5 + 3.5 * (1.0 - z);
     float fade = smoothstep(0.0, 0.3, z) * smoothstep(1.0, 0.7, z);
 
     vec2 uv2 = p * s + off + vec2(0.0, t * 0.1);
     float n = fbm(uv2, 3);
-    dens += smoothstep(0.5, 0.55, n) * fade;
+    dens += smoothstep(0.45, 0.6, n) * fade;
   }
 
   // 2. Cirrus layers (high up, slow)
-  vec2 pCirrus = p * 0.3 + vec2(t * 0.05, t * 0.02);
-  float nCirrus = fbm(pCirrus, 4);
-  float cirrus = smoothstep(0.6, 0.65, nCirrus) * 0.5;
+  vec2 pCirrus = p * 0.2 + vec2(t * 0.05, t * 0.02);
+  float nCirrus = fbm(pCirrus, 3);
+  float cirrus = smoothstep(0.55, 0.75, nCirrus) * 0.5;
   dens = max(dens, cirrus);
 
   dens = clamp(dens, 0.0, 1.0);
