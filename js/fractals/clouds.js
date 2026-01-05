@@ -11,11 +11,11 @@ export const clouds = {
   glsl: `
 // Infinite flight through clouds
 vec3 colorClouds(vec2 uv) {
-  float t = u_time * 0.5;
+  float t = u_time * 1.0;
 
   // Day/Night cycle: 0.0 (night, black) to 1.0 (day, white)
-  float dn = sin(u_time * 0.15) * 0.5 + 0.5;
-  dn = smoothstep(0.1, 0.9, dn);
+  float dayCycle = sin(u_time * 0.3) * 0.5 + 0.5;
+  float dn = smoothstep(0.1, 0.9, dayCycle);
 
   vec2 p = uv;
 
@@ -35,28 +35,43 @@ vec3 colorClouds(vec2 uv) {
 
     vec2 uv2 = p * s + off + vec2(0.0, t * 0.1);
     float n = fbm(uv2, 3);
-    dens += smoothstep(0.45, 0.65, n) * fade;
+    dens += smoothstep(0.5, 0.55, n) * fade;
   }
 
   // 2. Cirrus layers (high up, slow)
   vec2 pCirrus = p * 0.3 + vec2(t * 0.05, t * 0.02);
   float nCirrus = fbm(pCirrus, 4);
-  float cirrus = smoothstep(0.5, 0.85, nCirrus) * 0.5;
+  float cirrus = smoothstep(0.6, 0.65, nCirrus) * 0.5;
   dens = max(dens, cirrus);
 
   dens = clamp(dens, 0.0, 1.0);
 
-  // Colors based on day/night
-  // Day (dn=1): Sky=White, Clouds=Light blue-ish gray
-  // Night (dn=0): Sky=Black, Clouds=Dark gray-blue
-  vec3 bg = mix(vec3(0.0), vec3(1.0), dn);
-  vec3 cloud = mix(vec3(0.05, 0.05, 0.1), vec3(0.85, 0.9, 0.95), dn);
+  // Natural base colors
+  vec3 skyDay = vec3(0.6, 0.8, 1.0);
+  vec3 skyNight = vec3(0.01, 0.02, 0.05);
+  vec3 cloudDay = vec3(1.0, 1.0, 1.0);
+  vec3 cloudNight = vec3(0.05, 0.05, 0.1);
+
+  vec3 baseSky = mix(skyNight, skyDay, dn);
+  vec3 baseCloud = mix(cloudNight, cloudDay, dn);
+
+  // Palette influence (tint and gradient)
+  // We use UV for sky gradient and density for cloud tint
+  vec3 pColBg = getPalette(uv.y * 0.3 + dn * 0.2, u_palette);
+  vec3 pColCloud = getPalette(dens * 0.5 + dn * 0.5, u_palette);
+
+  vec3 bg = mix(baseSky, pColBg, 0.15);
+  vec3 cloud = mix(baseCloud, pColCloud, 0.15);
 
   vec3 col = mix(bg, cloud, dens);
 
-  // Bloom/Sun effect for day
-  float sun = pow(max(0.0, 1.0 - length(uv - vec2(0.3, 0.2))), 12.0);
-  col += sun * dn * 0.3;
+  // Bloom/Sun effect for day (more intense)
+  vec2 sunPos = vec2(
+    noise(vec2(t * 0.2, 1.23)) * 2.0 - 1.0,
+    noise(vec2(t * 0.2, 4.56)) * 2.0 - 1.0
+  );
+  float sun = pow(max(0.0, 1.0 - length(uv - sunPos)), 12.0);
+  col += sun * dn * 0.6;
 
   return col;
 }
