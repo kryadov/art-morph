@@ -4,14 +4,14 @@ Interactive WebGL (WebGL1) demo that renders multiple fractal types (GPU and 2D 
 
 ![img.png](img.png)
 
-This repository contains a small webpack setup for local development, production builds, and easy publishing to GitHub Pages.
+This repository contains a small Vite setup for local development, production builds, and easy publishing to GitHub Pages.
 
 ## Demo (after you publish)
 - GitHub Pages URL (project site): `https://<your-username>.github.io/<repo-name>/`
 - Or for a user/org site repo named `<your-username>.github.io`: `https://<your-username>.github.io/`
 
 ## Prerequisites
-- Node.js 18+ (recommended) and npm 9+
+- Node.js 22.12+ and npm 10+
 - Git
 
 Check versions:
@@ -27,19 +27,27 @@ npm -v
 npm install
 ```
 
+## Test
+
+```bash
+npm test
+```
+
+Runs the Vitest suite in `test/`.
+
 ## Run locally (development)
 
-Starts webpack-dev-server with live reload. It serves the repo root as static content and builds the JS bundle in-memory.
+Starts the Vite dev server with hot reload.
 
 ```bash
 npm start
 ```
 
-The dev server should open your default browser automatically. If it doesn’t, open the printed local URL (typically `http://localhost:8080`).
+The dev server should open your default browser automatically. If it doesn’t, open the printed local URL (typically `http://localhost:5173`).
 
 ## Build (production)
 
-Creates an optimized build in `dist/` with all required static assets copied.
+Creates an optimized build in `dist/`: the JS and CSS are bundled into `dist/assets/` and everything in `public/` is copied as-is. Asset URLs are relative (`base: './'` in `vite.config.mjs`), so the build works under a Pages subpath.
 
 ```bash
 npm run build
@@ -49,7 +57,11 @@ npm run build
 Because of browser security, open `dist/index.html` via a local web server (not the `file://` URL).
 
 One‑liner options:
-- Using Node (no install):
+- Using Vite:
+  ```bash
+  npm run preview
+  ```
+- Using Node:
   ```bash
   npx serve dist
   ```
@@ -138,9 +150,10 @@ Then in Settings → Pages, set Source to “GitHub Actions”.
 
 - `index.html` — page template (keeps script and asset links relative for Pages)
 - `js/app.js` — main WebGL application and overlay 2D renderer for line/tree fractals
-- `css/style.css` — styles
-- `img/`, `icon.svg`, `icon.png`, `favicon.ico`, `site.webmanifest`, `404.html`, `robots.txt` — static assets; copied to `dist/` during build
-- `webpack.*.js` — build configuration
+- `css/style.css` — styles (bundled by Vite)
+- `public/` — static assets (`img/`, `icon.svg`, `icon.png`, `favicon.ico`, `site.webmanifest`, `404.html`, `robots.txt`); copied to `dist/` unchanged. Reference them from `index.html` as `/name`; Vite rewrites them relative to `base`
+- `test/` — Vitest tests
+- `vite.config.mjs` — build and test configuration
 
 ## Controls (in the UI)
 
@@ -161,7 +174,6 @@ Then in Settings → Pages, set Source to “GitHub Actions”.
 
 - Blank screen or error about WebGL: your browser/device may not support WebGL 1. Try a different browser or update your drivers.
 - On GitHub Pages under a subpath, assets 404: make sure you’re visiting the full project URL (`https://<user>.github.io/<repo>/`), not just `https://<user>.github.io/`. All links are relative, so they should work as long as the base URL includes the repo path.
-- Double script inclusion (advanced): If you add additional HtmlWebpackPlugin instances or change template settings, ensure the bundle isn’t injected twice. In this repo, the production build uses your `index.html` template and references `js/app.js` directly.
 - Overlay not visible for line/tree fractals: ensure the `#overlay2d` canvas is present in `index.html` and not hidden by CSS; it’s drawn above the WebGL canvas and has `pointer-events: none`.
 
 ## License
